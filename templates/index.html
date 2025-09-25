@@ -1,0 +1,142 @@
+<!-- /templates/index.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Face Liveness Detection</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 2rem; background-color: #f0f2f5; }
+        #container { display: flex; flex-direction: column; align-items: center; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        video { border: 1px solid #ccc; border-radius: 4px; }
+        button { font-size: 1rem; padding: 0.5rem 1rem; margin-top: 1rem; cursor: pointer; border: none; background-color: #007bff; color: white; border-radius: 4px; transition: background-color 0.2s; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+        #result { margin-top: 1rem; font-size: 1.2rem; font-weight: bold; }
+        .live { color: green; }
+        .spoof { color: red; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Face Liveness Detection Demo</h1>
+        <video id="video" width="400" height="300" autoplay></video>
+        <button id="check-liveness">Check Liveness</button>
+        <div id="result">Result: (Pending)</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const checkButton = document.getElementById('check-liveness');
+        const resultDiv = document.getElementById('result');
+
+        // --- Configuration for Clip Recording ---
+        const CLIP_LENGTH = 100; // 100 frames for a 20-second capture
+        const FRAME_INTERVAL_MS = 200; // Capture a frame every 200ms (5 FPS)
+
+        // --- Sensor Data Collection ---
+        // This will only work on mobile devices with the necessary sensors and browser support.
+        // On a desktop, `latestSensorData` will remain null.
+        let latestSensorData = null;
+
+        function handleMotion(event) {
+            if (!latestSensorData) {
+                latestSensorData = Array(8).fill(0); // [accel_x,y,z, gyro_x,y,z, light, proximity]
+            }
+            // Using accelerationIncludingGravity for broader support.
+            latestSensorData[0] = event.accelerationIncludingGravity.x || 0;
+            latestSensorData[1] = event.accelerationIncludingGravity.y || 0;
+            latestSensorData[2] = event.accelerationIncludingGravity.z || 0;
+        }
+
+        function handleOrientation(event) {
+            if (!latestSensorData) {
+                latestSensorData = Array(8).fill(0);
+            }
+            // NOTE: DeviceOrientationEvent provides angles (degrees), not rotation rate (deg/s).
+            // For a real application, the Gyroscope API is preferred but has less support.
+            // This is a good-enough approximation for a demo.
+            latestSensorData[3] = event.alpha || 0; // z-axis rotation
+            latestSensorData[4] = event.beta || 0;  // x-axis rotation
+            latestSensorData[5] = event.gamma || 0; // y-axis rotation
+        }
+
+        window.addEventListener('devicemotion', handleMotion);
+        window.addEventListener('deviceorientation', handleOrientation);
+
+        // Access webcam
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(err => {
+                console.error("Error accessing webcam: ", err);
+                resultDiv.textContent = "Error: Could not access webcam.";
+            });
+
+        checkButton.addEventListener('click', async () => {
+            checkButton.disabled = true;
+            resultDiv.textContent = 'Get ready...';
+
+            const imageFrames = [];
+            const sensorReadings = [];
+            let framesCaptured = 0;
+
+            // Start recording after a short delay
+            setTimeout(() => {
+                const recorder = setInterval(() => {
+                    if (framesCaptured >= CLIP_LENGTH) {
+                        clearInterval(recorder);
+                        processAndSendClip();
+                        return;
+                    }
+
+                    // Capture frame
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    canvas.getContext('2d').drawImage(video, 0, 0);
+                    imageFrames.push(canvas.toDataURL('image/jpeg'));
+
+                    // Capture sensor reading (or null if on desktop)
+                    sensorReadings.push(latestSensorData ? [...latestSensorData] : null);
+                    
+                    framesCaptured++;
+                    resultDiv.textContent = `Recording... ${framesCaptured}/${CLIP_LENGTH}`;
+
+                }, FRAME_INTERVAL_MS);
+            }, 500);
+
+            async function processAndSendClip() {
+                resultDiv.textContent = 'Processing...';
+
+                // If all sensor readings are null (desktop), send null. Otherwise, send the array.
+                const finalSensorReadings = sensorReadings.every(s => s === null) ? null : sensorReadings;
+
+                try {
+                    const response = await fetch('/predict', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            image_clip: imageFrames,
+                            sensor_clip: finalSensorReadings
+                        })
+                    });
+                    const data = await response.json();
+                    
+                    const score = data.liveness_score;
+                    if (score > 0.5) {
+                        resultDiv.innerHTML = `Result: <span class="live">Live</span> (Score: ${score.toFixed(4)})`;
+                    } else {
+                        resultDiv.innerHTML = `Result: <span class="spoof">Spoof</span> (Score: ${score.toFixed(4)})`;
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    resultDiv.textContent = 'Error: Could not get prediction.';
+                } finally {
+                    checkButton.disabled = false;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
