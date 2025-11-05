@@ -21,16 +21,21 @@ FACE LIVENESS DETECTION
 ├── templates/
 │   └── index.html            # Frontend for the web application
 ├── app.py                    # Flask web server to deploy the TFLite model
-├── convert_to_tflite.py      # Converts the trained PyTorch model to TFLite
+├── convert_torch_to_onnx.py  # Converts the trained PyTorch model to ONNX
+├── convert_onnx_to_tflite.py # Converts the ONNX model to TFLite
 ├── create_dummy_dataset.py   # Generates a placeholder dataset for testing
 ├── dataset.py                # PyTorch custom Dataset for loading clips
-├── model.py                  # Defines the MultiModalLivenessModel architecture
+├── model.py                  # Defines the PyTorch model architecture
 ├── predict.py                # Standalone script for quick inference tests
 ├── train.py                  # Script to train the PyTorch model
 └── requirements.txt          # Python package dependencies
 ```
 
 ## Setup & Installation
+
+### Prerequisite: Python Version
+
+This project requires **Python 3.10**. The dependencies, especially for model conversion, are not compatible with newer Python versions. Please ensure you have Python 3.10 installed before proceeding.
 
 1.  **Clone the Repository**
     ```bash
@@ -39,7 +44,7 @@ FACE LIVENESS DETECTION
 
 2.  **Create a Virtual Environment (Recommended)**
     ```bash
-    python -m venv venv
+    python3.10 -m venv venv
     # On Windows
     .\venv\Scripts\activate
     # On macOS/Linux
@@ -47,8 +52,14 @@ FACE LIVENESS DETECTION
     ```
 
 3.  **Install Dependencies**
-    Install all the required packages using the provided `requirements.txt` file. This specific set of versions is known to be stable and compatible.
+    The `onnx` package requires `cmake` to be installed first. Follow these two steps in order:
+
     ```bash
+    # Step 3a: Install the build dependency first
+    pip install cmake
+    ```
+    ```bash
+    # Step 3b: Install the rest of the packages
     pip install -r requirements.txt
     ```
 
@@ -68,16 +79,22 @@ python create_dummy_dataset.py
 
 This script trains the `MultiModalLivenessModel` on the dummy dataset and saves the best-performing model weights as `liveness_model.pth`.
 
+Note: The default `CLIP_LENGTH` in `train.py` is 25.
+
 ```bash
 python train.py
 ```
 
 ### Step 3: Convert the Model to TensorFlow Lite
 
-After training, convert the saved PyTorch model (`.pth`) into the efficient TensorFlow Lite format (`.tflite`) for deployment.
+After training, convert the saved PyTorch model (`.pth`) into the efficient TensorFlow Lite format (`.tflite`) for deployment. This is a two-step process.
 
 ```bash
-python convert_to_tflite.py
+# 1. Convert PyTorch model to ONNX
+python convert_torch_to_onnx.py --input-model liveness_model.pth --output-model liveness_model.onnx
+
+# 2. Convert ONNX model to TensorFlow Lite
+python convert_onnx_to_tflite.py --input-model liveness_model.onnx --output-model liveness_model_int8.tflite
 ```
 
 ### Step 4: Run the Web Application

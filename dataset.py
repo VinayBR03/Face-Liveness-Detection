@@ -1,8 +1,8 @@
 # /liveness_detection/dataset.py
 
 import os
+from glob import glob
 import torch
-import pandas as pd
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
@@ -10,66 +10,87 @@ from torchvision import transforms
 
 class LivenessDataset(Dataset):
     """
-    Custom Dataset for loading multi-modal liveness data.
-    Assumes a root directory with images and a CSV file mapping them
-    to sensor data files and labels. Now handles clips of frames.
-    
-    CSV format:
-    video_id,frame_id,image_path,sensor_path,label
-    vid01,0,frame_001.jpg,sensors_001.txt,1
-    vid01,1,frame_002.jpg,sensors_002.txt,1
+    Custom Dataset for loading multi-modal liveness data by scanning directories.
+    It expects a structure like:
+    - {root_dir}/live/{video_id}/frame_xxx.jpg
+    - {root_dir}/spoof/{video_id}/frame_xxx.txt
     """
-    def __init__(self, csv_file, root_dir, clip_length=5, transform=None):
-        self.annotations = pd.read_csv(csv_file)
+    def __init__(self, root_dir, clip_length=25, transform=None, is_train=True):
         self.root_dir = root_dir
         self.clip_length = clip_length
+        self.valid_indices = self._precompute_valid_indices()
         self.transform = transform or transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
+        
+        if is_train:
+            # Augmentation for the training set
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        else:
+            # No augmentation for the validation/test set
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
 
     def __len__(self):
-        # Return the number of possible start frames for a full clip
-        return len(self.annotations) - self.clip_length + 1
+        # Return the number of valid clips we can create.
+        return len(self.valid_indices)
+
+    def _precompute_valid_indices(self):
+        """Scans the directory to find all valid video clips."""
+        clips = []
+        # Use 'real' and 'fake' as per the new data structure
+        for label_str in ['real', 'fake']:
+            label = 1 if label_str == 'real' else 0
+            # The folder itself contains all frames for that class
+            class_dir = os.path.join(self.root_dir, label_str)
+            if not os.path.isdir(class_dir):
+                continue
+            
+            # Find all image files and sort them to ensure temporal order
+            frame_paths = sorted(glob(os.path.join(class_dir, '*.jpg')))
+            if len(frame_paths) >= self.clip_length:
+                # Create clips using a sliding window over the sorted file list
+                for i in range(len(frame_paths) - self.clip_length + 1):
+                    clip_info = {"frames": frame_paths[i : i + self.clip_length], "label": label}
+                    clips.append(clip_info)
+        return clips
 
     def __getitem__(self, index):
-        # Get a clip of frames and sensor data
-        start_frame_info = self.annotations.iloc[index]
-        end_frame_index = index + self.clip_length - 1
+        clip_info = self.valid_indices[index]
+        clip_frames, clip_sensors = [], []
 
-        # Ensure the clip does not cross over to a different video
-        # This is a simple check; a more robust implementation would pre-calculate valid indices
-        if end_frame_index >= len(self.annotations) or \
-           start_frame_info['video_id'] != self.annotations.iloc[end_frame_index]['video_id']:
-            # If at the end, recursively get the previous item to ensure a full clip
-            return self.__getitem__(index - 1)
-
-        clip_frames = []
-        clip_sensors = []
-
-        for i in range(self.clip_length):
-            frame_index = index + i
-            frame_info = self.annotations.iloc[frame_index]
-
+        for img_path in clip_info['frames']:
             # Image data
-            img_path = os.path.join(self.root_dir, frame_info['image_path'])
             image = Image.open(img_path).convert("RGB")
             if self.transform:
                 image = self.transform(image)
             clip_frames.append(image)
 
             # Sensor data
-            sensor_path = os.path.join(self.root_dir, frame_info['sensor_path'])
-            sensor_data = np.loadtxt(sensor_path, delimiter=',', dtype=np.float32)
+            # Assumes sensor file has the same name but with .txt extension
+            sensor_path = os.path.splitext(img_path)[0] + '.txt'
+            # Handle cases where a sensor file might be missing
+            if os.path.exists(sensor_path):
+                sensor_data = np.loadtxt(sensor_path, delimiter=',', dtype=np.float32)
+            else:
+                # If no sensor file, create a zero-filled array. Assumes sensor_dim is 8.
+                sensor_data = np.zeros(8, dtype=np.float32)
             clip_sensors.append(sensor_data)
 
         # Stack the frames and sensors to create clip tensors
         image_clip = torch.stack(clip_frames, dim=0)
         sensor_clip = torch.from_numpy(np.array(clip_sensors, dtype=np.float32))
-
-        # Label
-        # The label for the clip is the label of its first frame
-        label = torch.tensor(int(start_frame_info['label']), dtype=torch.float32)
+        label = torch.tensor(clip_info['label'], dtype=torch.float32)
 
         return image_clip, sensor_clip, label

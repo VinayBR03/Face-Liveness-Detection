@@ -1,110 +1,127 @@
-# /app.py
-
+import cv2
 import base64
 import io
 import numpy as np
-import torch
-import tensorflow as tf
 from flask import Flask, render_template, request, jsonify
 from PIL import Image
+from cvzone.FaceDetectionModule import FaceDetector
 
-# --- Configuration ---
-MODEL_PATH = "liveness_model.tflite"
+from tensorflow.lite.python.interpreter import Interpreter
 
-# --- Initialize Flask App and Model ---
+# ------------------ Flask App ------------------
 app = Flask(__name__)
 
-# 1. Load TFLite Model and allocate tensors.
-try:
-    interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    print("TFLite model loaded successfully.")
-    # Print input shapes for debugging
-    print("Expected Input Shapes:", [detail['shape'] for detail in input_details])
-except FileNotFoundError:
-    print(f"Error: Model file not found at '{MODEL_PATH}'. The app will not work.")
-    interpreter = None
-except Exception as e:
-    print(f"Error loading TFLite model: {e}")
-    interpreter = None
+# ------------------ Config ------------------
+MODEL_PATH = "liveness_model_int8.tflite"
+CLIP_LENGTH = 25
+SENSOR_DIM = 8  # adjust if your model expects a different sensor dimension
 
-# 2. Define Clip Preprocessing for TFLite
-def preprocess_clip(image_b64_list):
-    """Preprocesses a list of base64 encoded images into a clip tensor for TFLite."""
-    clip_frames = []
-    for image_b64 in image_b64_list:
-        image_bytes = base64.b64decode(image_b64.split(',')[1])
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        image = image.resize((224, 224))
-        
-        # Convert to numpy array and normalize to [0, 1]
-        image_np = np.array(image, dtype=np.float32) / 255.0
-        clip_frames.append(image_np)
+# ------------------ Load TFLite Model ------------------
+interpreter = Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
-    # Stack frames to form a clip and add a batch dimension.
-    # The expected shape is (1, clip_length, height, width, channels).
-    # Note: The TFLite model expects channels-last format (H, W, C).
-    image_clip_np = np.stack(clip_frames, axis=0)
-    return np.expand_dims(image_clip_np, axis=0).astype(np.float32)
+# ------------------ Face Detector ------------------
+detector = FaceDetector(minDetectionCon=0.7)
 
-@app.route('/')
+# ------------------ Preprocessing ------------------
+def preprocess_image_clip(image_b64_list):
+    """Convert base64-encoded frames into normalized model-ready tensor."""
+    frames = []
+    for b64_img in image_b64_list:
+        try:
+            img = Image.open(io.BytesIO(base64.b64decode(b64_img.split(",")[1]))).convert("RGB")
+            img = img.resize((224, 224))
+            arr = np.asarray(img, dtype=np.float32) / 255.0
+            arr = (arr - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
+            frames.append(arr)
+        except Exception as e:
+            print("Frame decode error:", e)
+            continue
+    if not frames:
+        return None
+    clip = np.stack(frames, axis=0)[np.newaxis, ...]  # shape (1, clip_len, h, w, c)
+    return clip.astype(np.float32)
+
+# ------------------ Routes ------------------
+@app.route("/")
 def index():
-    """Render the main HTML page."""
-    return render_template('index.html')
+    """Serve the webcam interface."""
+    return render_template("index.html")
 
-@app.route('/predict', methods=['POST'])
+
+@app.route("/detect", methods=["POST"])
+def detect():
+    """Detect faces from webcam frame."""
+    try:
+        data = request.get_json()
+        if not data or "image" not in data:
+            return jsonify({"error": "Missing frame data"}), 400
+
+        frame_b64 = data["image"].split(",")[-1]
+        img_bytes = base64.b64decode(frame_b64)
+        npimg = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+
+        img, bboxs = detector.findFaces(frame, draw=False)
+
+        faces = []
+        if bboxs:
+            for bbox in bboxs:
+                x, y, w, h = bbox["bbox"]
+                faces.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        _, buffer = cv2.imencode(".jpg", img)
+        encoded = base64.b64encode(buffer).decode("utf-8")
+
+        return jsonify({"faces": faces, "image": f"data:image/jpeg;base64,{encoded}"})
+    except Exception as e:
+        print("Detection Error:", e)
+        return jsonify({"error": "Detection failed"}), 500
+
+
+@app.route("/predict", methods=["POST"])
 def predict():
-    """Handles prediction for a clip of frames and sensor data."""
-    if interpreter is None:
-        return jsonify({'error': 'Model not loaded'}), 500
+    """Predict liveness score from image clip."""
+    try:
+        data = request.get_json()
+        image_clip = data.get("image_clip", [])
+        sensor_clip = data.get("sensor_clip", [])
 
-    data = request.json
-    image_clip_b64 = data.get('image_clip')
-    sensor_clip_data = data.get('sensor_clip')
+        if len(image_clip) != CLIP_LENGTH:
+            return jsonify({"error": f"Expected {CLIP_LENGTH} frames, got {len(image_clip)}"}), 400
 
-    if not image_clip_b64:
-        return jsonify({'error': 'Image clip data is missing.'}), 400
+        img_clip = preprocess_image_clip(image_clip)
+        if img_clip is None:
+            return jsonify({"error": "Failed to preprocess images"}), 400
 
-    # Preprocess the full image clip
-    image_clip_tensor = preprocess_clip(image_clip_b64)
+        # Handle sensor data
+        if not sensor_clip:
+            sensor_data = np.zeros((CLIP_LENGTH, SENSOR_DIM), dtype=np.float32)
+        else:
+            sensor_data = np.array(sensor_clip, dtype=np.float32)
+        sensor_clip = np.expand_dims(sensor_data, axis=0)
 
-    # Preprocess the full sensor clip
-    if sensor_clip_data and len(sensor_clip_data) > 0:
-        # Add a batch dimension to match model's expected shape (1, 5, 8)
-        sensor_clip_tensor = np.expand_dims(np.array(sensor_clip_data, dtype=np.float32), axis=0)
-    else:
-        # If no sensor data, create a zero-tensor
-        sensor_clip_tensor = np.zeros(input_details[0]['shape'], dtype=np.float32)
+        # Feed to model
+        interpreter.set_tensor(input_details[0]["index"], img_clip)
+        interpreter.set_tensor(input_details[1]["index"], sensor_clip)
+        interpreter.invoke()
 
-    # Set tensors for the TFLite interpreter
-    # IMPORTANT: Match the tensor to the correct input detail index.
-    # Based on the logs, input 0 is sensor data and input 1 is image data.
-    sensor_input_index = input_details[0]['index']
-    image_input_index = input_details[1]['index']
+        score = interpreter.get_tensor(output_details[0]["index"])[0][0]
+        liveness = 1 / (1 + np.exp(-score))
+        result = "Real Face ✅" if liveness > 0.5 else "Fake Face ❌"
 
-    # Check which input is which based on shape
-    if len(input_details[0]['shape']) == 3: # Sensor shape is (1, 5, 8)
-        sensor_input_index = input_details[0]['index']
-        image_input_index = input_details[1]['index']
-    else: # Image shape is (1, 5, 224, 224, 3)
-        image_input_index = input_details[0]['index']
-        sensor_input_index = input_details[1]['index']
-    
-    # The TFLite model expects a channels-first format (N, D, C, H, W).
-    # We must transpose the image clip from (1, 5, 224, 224, 3) to (1, 5, 3, 224, 224).
-    image_clip_tensor = np.transpose(image_clip_tensor, (0, 1, 4, 2, 3))
+        return jsonify({
+            "liveness_score": float(liveness),
+            "result": result
+        })
+    except Exception as e:
+        print("Prediction Error:", e)
+        return jsonify({"error": "Prediction failed"}), 500
 
-    interpreter.set_tensor(sensor_input_index, sensor_clip_tensor)
-    interpreter.set_tensor(image_input_index, image_clip_tensor)
 
-    # Run inference
-    interpreter.invoke()
-    
-    output = interpreter.get_tensor(output_details[0]['index'])
-    liveness_score = 1 / (1 + np.exp(-output[0][0])) # Apply sigmoid manually
-    return jsonify({'liveness_score': liveness_score})
-
-if __name__ == '__main__':
+# ------------------ Run App ------------------
+if __name__ == "__main__":
     app.run(debug=True)
