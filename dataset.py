@@ -15,7 +15,7 @@ class LivenessDataset(Dataset):
     - {root_dir}/live/{video_id}/frame_xxx.jpg
     - {root_dir}/spoof/{video_id}/frame_xxx.txt
     """
-    def __init__(self, root_dir, clip_length=25, transform=None, is_train=True):
+    def __init__(self, root_dir, clip_length=10, transform=None, is_train=True):
         self.root_dir = root_dir
         self.clip_length = clip_length
         self.valid_indices = self._precompute_valid_indices()

@@ -7,7 +7,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-model", type=str, required=True, help="Path to the input .pth model file.")
     parser.add_argument("--output-model", type=str, required=True, help="Path for the output .onnx model file.")
-    parser.add_argument("--clip-length", type=int, default=25, help="Length of the input clips for the model.")
+    parser.add_argument("--clip-length", type=int, default=10, help="Length of the input clips for the model.")
     args = parser.parse_args()
 
     print(f"🔄 Converting {args.input_model} to {args.output_model}...")

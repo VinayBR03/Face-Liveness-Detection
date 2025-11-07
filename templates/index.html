@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Fast Face Liveness Detection</title>
+  <title>Face Liveness Detection</title>
   <style>
     body {
       font-family: sans-serif;
@@ -14,7 +14,7 @@
       background: white;
       padding: 2rem;
       border-radius: 8px;
-      width: 450px;
+      width: 460px;
       margin: auto;
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
       position: relative;
@@ -44,8 +44,6 @@
     #start-btn { background-color: #28a745; }
     #stop-btn { background-color: #dc3545; }
     #result { font-weight: bold; margin-top: 1rem; }
-
-    /* Loading spinner */
     #loader {
       display: none;
       border: 6px solid #f3f3f3;
@@ -63,8 +61,6 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-
-    /* FPS counter */
     #fps-counter {
       position: absolute;
       bottom: 8px;
@@ -94,67 +90,102 @@
   </div>
 
   <script>
-    const video = document.getElementById("video");
-    const overlay = document.getElementById("overlay");
-    const ctx = overlay.getContext("2d");
-    const startBtn = document.getElementById("start-btn");
-    const stopBtn = document.getElementById("stop-btn");
-    const resultDiv = document.getElementById("result");
-    const loader = document.getElementById("loader");
-    const fpsCounter = document.getElementById("fps-counter");
+  const video = document.getElementById("video");
+  const overlay = document.getElementById("overlay");
+  const ctx = overlay.getContext("2d");
+  const startBtn = document.getElementById("start-btn");
+  const stopBtn = document.getElementById("stop-btn");
+  const resultDiv = document.getElementById("result");
+  const loader = document.getElementById("loader");
+  const fpsCounter = document.getElementById("fps-counter");
 
-    let frames = [], sensors = [], interval = null, predictionText = "";
-    const CLIP = 25;
+  const CLIP = 10;
 
-    let lastTime = performance.now();
-    let fps = 0;
+  let frames = [];
+  let sensors = [];
+  let faceBoxesClip = [];   // <— NEW: keep last boxes
+  let interval = null;
+  let predictionText = "";
+  let inflight = false;
+  let lastFace = null;
 
-    // 🟢 Enable camera
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        video.srcObject = stream;
-        startBtn.disabled = false;
-      })
-      .catch(err => alert("Camera access denied: " + err));
+  let lastTime = performance.now();
+  let fps = 0;
 
-    // 🧠 Device motion (optional for mobile)
-    if (window.DeviceMotionEvent) {
-      window.addEventListener("devicemotion", e => {
-        sensors.push([
-          e.accelerationIncludingGravity.x || 0,
-          e.accelerationIncludingGravity.y || 0,
-          e.accelerationIncludingGravity.z || 0,
-          0, 0, 0, 0, 0
-        ]);
-        if (sensors.length > CLIP) sensors.shift();
-      });
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+      video.srcObject = stream;
+      startBtn.disabled = false;
+    })
+    .catch(err => alert("Camera access denied: " + err));
+
+  if (window.DeviceMotionEvent) {
+    window.addEventListener("devicemotion", e => {
+      sensors.push([
+        (e.accelerationIncludingGravity?.x) || 0,
+        (e.accelerationIncludingGravity?.y) || 0,
+        (e.accelerationIncludingGravity?.z) || 0,
+        0, 0, 0, 0, 0
+      ]);
+      if (sensors.length > CLIP) sensors.shift();
+    });
+  }
+
+  async function detectFace(frameData) {
+    const res = await fetch("/detect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: frameData })
+    });
+    const out = await res.json();
+    if (out.faces && out.faces.length > 0) {
+      lastFace = out.faces[0];
     }
+    return out;
+  }
 
-    async function detectFace(frameData) {
-      const res = await fetch("/detect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: frameData })
-      });
-      return await res.json();
-    }
+  async function processFrames() {
+    if (inflight) return;
+    if (frames.length < CLIP) return;
 
-    async function processFrames() {
-      if (frames.length < CLIP) return;
+    inflight = true;
+    loader.style.display = "block";
 
-      loader.style.display = "block"; // show spinner
-
+    try {
       const res = await fetch("/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_clip: frames, sensor_clip: sensors })
+        body: JSON.stringify({
+          image_clip: frames,
+          sensor_clip: sensors,
+          face_boxes: faceBoxesClip   // <— SEND boxes
+        })
       });
-
       const data = await res.json();
-      loader.style.display = "none"; // hide spinner
+      loader.style.display = "none";
+      inflight = false;
+
+      if (data.error) {
+        resultDiv.textContent = data.error;
+        resultDiv.style.color = "orange";
+        return;
+      }
 
       const score = data.liveness_score;
-      if (score > 0.5) {
+      if (typeof score !== "number" || !isFinite(score)) {
+        resultDiv.textContent = "Invalid score";
+        resultDiv.style.color = "orange";
+        return;
+      }
+
+      if (data.reason === "Insufficient motion/variation") {
+        predictionText = "Move head slightly";
+        resultDiv.textContent = "Move head slightly";
+        resultDiv.style.color = "orange";
+        return;
+      }
+
+      if (score >= 0.90) {              // mirror server threshold
         predictionText = `Real ${(score * 100).toFixed(1)}%`;
         resultDiv.style.color = "green";
       } else {
@@ -162,64 +193,93 @@
         resultDiv.style.color = "red";
       }
       resultDiv.textContent = predictionText;
-    }
-
-    // 🟢 Start capturing frames
-    startBtn.onclick = () => {
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      loader.style.display = "block";
-      interval = setInterval(async () => {
-        const now = performance.now();
-        fps = 1000 / (now - lastTime);
-        lastTime = now;
-        fpsCounter.textContent = "FPS: " + fps.toFixed(1);
-
-        const canvas = document.createElement("canvas");
-        canvas.width = 400;
-        canvas.height = 300;
-        const cctx = canvas.getContext("2d");
-        cctx.drawImage(video, 0, 0, 400, 300);
-        const frameData = canvas.toDataURL("image/jpeg", 0.7);
-
-        const detection = await detectFace(frameData);
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-        if (detection.faces && detection.faces.length > 0) {
-          const f = detection.faces[0];
-          ctx.strokeStyle = resultDiv.style.color || "#00bfff";
-          ctx.lineWidth = 3;
-          ctx.strokeRect(f.x, f.y, f.w, f.h);
-
-          // Label at top-right corner of bounding box
-          ctx.font = "bold 16px sans-serif";
-          ctx.fillStyle = resultDiv.style.color || "#00bfff";
-          const textWidth = ctx.measureText(predictionText).width;
-          const textX = f.x + f.w - textWidth - 5;
-          const textY = Math.max(f.y + 20, 20);
-          ctx.fillText(predictionText, textX, textY);
-
-          frames.push(frameData);
-          if (frames.length > CLIP) frames.shift();
-          if (frames.length === CLIP) {
-            processFrames();
-          }
-        }
-      }, 100);
-    };
-
-    // 🔴 Stop capturing frames
-    stopBtn.onclick = () => {
-      clearInterval(interval);
-      interval = null;
-      ctx.clearRect(0, 0, overlay.width, overlay.height);
-      resultDiv.textContent = "";
-      predictionText = "";
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
+    } catch (e) {
       loader.style.display = "none";
-      fpsCounter.textContent = "FPS: 0";
-    };
-  </script>
+      inflight = false;
+      resultDiv.textContent = "Prediction failed";
+      resultDiv.style.color = "orange";
+    }
+  }
+
+  startBtn.onclick = () => {
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    loader.style.display = "block";
+
+    frames = [];
+    sensors = [];
+    faceBoxesClip = [];   // <— reset
+
+    interval = setInterval(async () => {
+      const now = performance.now();
+      fps = 1000 / (now - lastTime);
+      lastTime = now;
+      fpsCounter.textContent = "FPS: " + fps.toFixed(1);
+
+      const full = document.createElement("canvas");
+      full.width = 400;
+      full.height = 300;
+      const fctx = full.getContext("2d");
+      fctx.drawImage(video, 0, 0, 400, 300);
+      const fullData = full.toDataURL("image/jpeg", 0.7);
+
+      const detection = await detectFace(fullData);
+
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+      if (lastFace) {
+        const f = lastFace;
+
+        // Draw box
+        ctx.strokeStyle = resultDiv.style.color || "#00bfff";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(f.x, f.y, f.w, f.h);
+
+        // Crop face and resize to 224x224
+        const faceCanvas = document.createElement("canvas");
+        const faceCtx = faceCanvas.getContext("2d");
+        faceCanvas.width = 224;
+        faceCanvas.height = 224;
+        faceCtx.drawImage(video, f.x, f.y, f.w, f.h, 0, 0, 224, 224);
+        const faceData = faceCanvas.toDataURL("image/jpeg", 0.9);
+
+        // Build clips
+        frames.push(faceData);
+        if (frames.length > CLIP) frames.shift();
+
+        faceBoxesClip.push({ x: f.x, y: f.y, w: f.w, h: f.h });  // <— keep boxes
+        if (faceBoxesClip.length > CLIP) faceBoxesClip.shift();
+
+        if (frames.length === CLIP) {
+          await processFrames();
+        }
+
+        // Label
+        ctx.font = "bold 16px sans-serif";
+        ctx.fillStyle = resultDiv.style.color || "#00bfff";
+        const textWidth = ctx.measureText(predictionText).width;
+        const textX = f.x + f.w - textWidth - 5;
+        const textY = Math.max(f.y + 20, 20);
+        ctx.fillText(predictionText, textX, textY);
+      }
+    }, 100);
+  };
+
+  stopBtn.onclick = () => {
+    clearInterval(interval);
+    interval = null;
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    resultDiv.textContent = "";
+    predictionText = "";
+    frames = [];
+    sensors = [];
+    faceBoxesClip = [];  // <— reset
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    loader.style.display = "none";
+    fpsCounter.textContent = "FPS: 0";
+  };
+</script>
+
 </body>
 </html>

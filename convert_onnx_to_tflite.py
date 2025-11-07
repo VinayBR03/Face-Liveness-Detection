@@ -75,8 +75,8 @@ def convert_onnx_to_tflite(onnx_path, tflite_path, calib_samples=50):
                 # The onnx-tf converter expects the TensorFlow format (NDHWC) for its
                 # internal graph representation, even when converting from an ONNX model
                 # that used NCDHW.
-                image_clip = np.random.rand(1, 25, 224, 224, 3).astype(np.float32)
-                sensor_clip = np.random.rand(1, 25, 8).astype(np.float32)
+                image_clip = np.random.rand(1, 10, 224, 224, 3).astype(np.float32)
+                sensor_clip = np.random.rand(1, 10, 8).astype(np.float32)
                 yield {"image_clip": image_clip, "sensor_clip": sensor_clip}
 
         # Convert to TFLite

@@ -115,7 +115,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=4, help='Batch size for training.')
     parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs.')
     parser.add_argument('--learning-rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
-    parser.add_argument('--clip-length', type=int, default=25, help='Number of frames per clip.')
+    parser.add_argument('--clip-length', type=int, default=10, help='Number of frames per clip.')
     
     args = parser.parse_args()
     main(args)
