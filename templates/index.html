@@ -103,7 +103,7 @@
 
   let frames = [];
   let sensors = [];
-  let faceBoxesClip = [];   // <— NEW: keep last boxes
+  let faceBoxesClip = [];
   let interval = null;
   let predictionText = "";
   let inflight = false;
@@ -158,7 +158,7 @@
         body: JSON.stringify({
           image_clip: frames,
           sensor_clip: sensors,
-          face_boxes: faceBoxesClip   // <— SEND boxes
+          face_boxes: faceBoxesClip
         })
       });
       const data = await res.json();
@@ -185,7 +185,7 @@
         return;
       }
 
-      if (score >= 0.90) {              // mirror server threshold
+      if (score >= 0.90) {
         predictionText = `Real ${(score * 100).toFixed(1)}%`;
         resultDiv.style.color = "green";
       } else {
@@ -208,7 +208,7 @@
 
     frames = [];
     sensors = [];
-    faceBoxesClip = [];   // <— reset
+    faceBoxesClip = [];
 
     interval = setInterval(async () => {
       const now = performance.now();
@@ -216,6 +216,7 @@
       lastTime = now;
       fpsCounter.textContent = "FPS: " + fps.toFixed(1);
 
+      // Full 400x300 frame for detection
       const full = document.createElement("canvas");
       full.width = 400;
       full.height = 300;
@@ -223,44 +224,44 @@
       fctx.drawImage(video, 0, 0, 400, 300);
       const fullData = full.toDataURL("image/jpeg", 0.7);
 
-      const detection = await detectFace(fullData);
+      // Ask server for face box (used only for overlay + metadata)
+      await detectFace(fullData);
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
 
       if (lastFace) {
         const f = lastFace;
 
-        // Draw box
+        // Draw the box and label
         ctx.strokeStyle = resultDiv.style.color || "#00bfff";
         ctx.lineWidth = 3;
         ctx.strokeRect(f.x, f.y, f.w, f.h);
 
-        // Crop face and resize to 224x224
-        const faceCanvas = document.createElement("canvas");
-        const faceCtx = faceCanvas.getContext("2d");
-        faceCanvas.width = 224;
-        faceCanvas.height = 224;
-        faceCtx.drawImage(video, f.x, f.y, f.w, f.h, 0, 0, 224, 224);
-        const faceData = faceCanvas.toDataURL("image/jpeg", 0.9);
-
-        // Build clips
-        frames.push(faceData);
-        if (frames.length > CLIP) frames.shift();
-
-        faceBoxesClip.push({ x: f.x, y: f.y, w: f.w, h: f.h });  // <— keep boxes
-        if (faceBoxesClip.length > CLIP) faceBoxesClip.shift();
-
-        if (frames.length === CLIP) {
-          await processFrames();
-        }
-
-        // Label
         ctx.font = "bold 16px sans-serif";
         ctx.fillStyle = resultDiv.style.color || "#00bfff";
         const textWidth = ctx.measureText(predictionText).width;
         const textX = f.x + f.w - textWidth - 5;
         const textY = Math.max(f.y + 20, 20);
         ctx.fillText(predictionText, textX, textY);
+
+        // >>> SEND FULL FRAME (scaled to 224x224) to the model <<<
+        const frame224 = document.createElement("canvas");
+        frame224.width = 224;
+        frame224.height = 224;
+        const c224 = frame224.getContext("2d");
+        c224.drawImage(video, 0, 0, 224, 224);
+        const frameData = frame224.toDataURL("image/jpeg", 0.9);
+
+        frames.push(frameData);
+        if (frames.length > CLIP) frames.shift();
+
+        // Keep boxes as metadata (not used to crop)
+        faceBoxesClip.push({ x: f.x, y: f.y, w: f.w, h: f.h });
+        if (faceBoxesClip.length > CLIP) faceBoxesClip.shift();
+
+        if (frames.length === CLIP) {
+          await processFrames();
+        }
       }
     }, 100);
   };
@@ -273,7 +274,7 @@
     predictionText = "";
     frames = [];
     sensors = [];
-    faceBoxesClip = [];  // <— reset
+    faceBoxesClip = [];
     startBtn.disabled = false;
     stopBtn.disabled = true;
     loader.style.display = "none";
