@@ -12,7 +12,7 @@ from tensorflow.lite.python.interpreter import Interpreter
 app = Flask(__name__)
 
 # ------------------ Config ------------------
-MODEL_PATH = "liveness_model_int8.tflite"  # keep this name even if the model has FP16 weights
+MODEL_PATH = "liveness_model_fp32.tflite"  # keep this name even if the model has FP16 weights
 CLIP_LENGTH = 10
 SENSOR_DIM = 8
 

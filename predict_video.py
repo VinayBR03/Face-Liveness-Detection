@@ -45,7 +45,10 @@ def get_bindings(interpreter):
             if len(d["shape"]) == 3:
                 sen_in = sen_in or d
     assert img_in is not None and sen_in is not None, "Could not map inputs"
-    expects_nchw_time = (len(img_in["shape"]) == 5 and img_in["shape"][2] == 3)
+    # Keras TFLite models are typically NTHWC, PyTorch ONNX are NTCHW
+    # Check the channel dimension.
+    img_shape = img_in["shape"]
+    expects_nchw_time = (len(img_shape) == 5 and img_shape[2] == 3)
     return img_in, sen_in, expects_nchw_time
 
 def build_clip_from_video(path, expects_nchw_time):
@@ -95,7 +98,7 @@ def sigmoid(x):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
-    ap.add_argument("--model", default="liveness_model_int8.tflite")
+    ap.add_argument("--model", default="liveness_model_fp32.tflite", help="Path to the TFLite model file.")
     args = ap.parse_args()
 
     interpreter = load_interpreter(args.model)
@@ -119,9 +122,18 @@ def main():
     interpreter.set_tensor(img_in["index"], img)
     interpreter.invoke()
 
-    y = interpreter.get_tensor(out["index"]).reshape(-1)[0]
-    score = sigmoid(y)
-    print(f"Raw logit: {y:.4f}")
+    raw_output = interpreter.get_tensor(out["index"]).reshape(-1)[0]
+
+    # Dequantize the output if the model is quantized (INT8/UINT8)
+    scale, zero_point = out.get("quantization", (0.0, 0))
+    if scale > 0.0:
+        logit = (float(raw_output) - zero_point) * scale
+        print(f"Raw quantized output: {raw_output}")
+    else:
+        logit = float(raw_output)
+
+    score = sigmoid(logit)
+    print(f"Raw logit: {logit:.4f}")
     print(f"Liveness score: {score:.4f}")
     print("Decision:", "Real Face" if score >= 0.5 else "Fake Face")
 

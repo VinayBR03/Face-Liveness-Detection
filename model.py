@@ -47,28 +47,60 @@ class MultiModalLivenessModel(nn.Module):
         mobilenet = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.IMAGENET1K_V1)
         self.image_features = nn.Sequential(*list(mobilenet.children())[:-1])
         self.attention = CBAM(image_feature_dim)
-        self.lstm = nn.LSTM(
-            input_size=image_feature_dim + sensor_input_dim,
-            hidden_size=lstm_hidden_dim,
-            num_layers=2,
-            batch_first=True,
-            dropout=dropout_rate
+        
+        # First reshape the combined features
+        self.pre_lstm = nn.Sequential(
+            nn.Linear(image_feature_dim + sensor_input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, lstm_hidden_dim),
+            nn.ReLU()
         )
+        
+        # Single-layer LSTM with fixed size
+        self.lstm = nn.LSTM(
+            input_size=lstm_hidden_dim,
+            hidden_size=lstm_hidden_dim,
+            num_layers=1,
+            batch_first=True
+        )
+        
+        # Simple classifier
         self.classifier = nn.Sequential(
             nn.Linear(lstm_hidden_dim, 64),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
             nn.Linear(64, 1)
         )
+        
         self.adap_pool = nn.AdaptiveAvgPool2d(1)
+        self.lstm_hidden_dim = lstm_hidden_dim
 
     def forward(self, image_clip, sensor_clip):
         batch_size, clip_length, C, H, W = image_clip.shape
-        image_input = image_clip.view(batch_size * clip_length, C, H, W)
+        
+        # Process images
+        image_input = image_clip.reshape(-1, C, H, W)
         img_feat = self.image_features(image_input)
         img_feat = self.attention(img_feat)
-        img_feat = self.adap_pool(img_feat).view(batch_size, clip_length, -1)
-        fused = torch.cat((img_feat, sensor_clip), dim=2)
-        lstm_out, (hidden, _) = self.lstm(fused)
-        out = self.classifier(hidden[-1])
-        return out
+        img_feat = self.adap_pool(img_feat)
+        img_feat = img_feat.reshape(batch_size, clip_length, -1)
+        
+        # Concatenate features
+        combined = torch.cat((img_feat, sensor_clip), dim=2)
+        
+        # Prepare for LSTM
+        lstm_input = self.pre_lstm(combined)
+        
+        # Initialize LSTM states
+        h0 = torch.zeros(1, batch_size, self.lstm_hidden_dim, device=lstm_input.device)
+        c0 = torch.zeros(1, batch_size, self.lstm_hidden_dim, device=lstm_input.device)
+        
+        # LSTM forward pass
+        lstm_out, _ = self.lstm(lstm_input, (h0, c0))
+        
+        # Use final timestep for classification
+        final_features = lstm_out[:, -1, :]
+        output = self.classifier(final_features)
+        
+        return output
+

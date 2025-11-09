@@ -11,8 +11,11 @@ mediapipe==0.10.11
 cvzone==1.6.1
 
 # Model Conversion Libraries (pinned for compatibility with TF 2.13)
-onnx==1.14.0
+onnx==1.16.1
 onnx-tf==1.10.0
+onnxsim==0.4.36
+onnx2tf==1.20.3
+--extra-index-url https://pypi.ngc.nvidia.com onnx-graphsurgeon==0.3.26
 tensorflow-probability==0.20.1
 
 # TensorFlow Lite Runtime (for .tflite model inference)
