@@ -44,23 +44,6 @@
     #start-btn { background-color: #28a745; }
     #stop-btn { background-color: #dc3545; }
     #result { font-weight: bold; margin-top: 1rem; }
-    #loader {
-      display: none;
-      border: 6px solid #f3f3f3;
-      border-top: 6px solid #38a1db;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      animation: spin 1s linear infinite;
-      position: absolute;
-      top: 130px;
-      left: calc(50% - 20px);
-      z-index: 10;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
     #fps-counter {
       position: absolute;
       bottom: 8px;
@@ -79,7 +62,6 @@
     <div style="position: relative; display: inline-block;">
       <video id="video" autoplay muted playsinline></video>
       <canvas id="overlay" width="400" height="300"></canvas>
-      <div id="loader"></div>
       <div id="fps-counter">FPS: 0</div>
     </div>
     <div>
@@ -96,7 +78,6 @@
   const startBtn = document.getElementById("start-btn");
   const stopBtn = document.getElementById("stop-btn");
   const resultDiv = document.getElementById("result");
-  const loader = document.getElementById("loader");
   const fpsCounter = document.getElementById("fps-counter");
 
   const CLIP = 10;
@@ -149,20 +130,16 @@
     if (frames.length < CLIP) return;
 
     inflight = true;
-    loader.style.display = "block";
 
     try {
       const res = await fetch("/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          image_clip: frames,
-          sensor_clip: sensors,
-          face_boxes: faceBoxesClip
+          image_clip: frames, sensor_clip: sensors, face_boxes: faceBoxesClip
         })
       });
       const data = await res.json();
-      loader.style.display = "none";
       inflight = false;
 
       if (data.error) {
@@ -194,7 +171,6 @@
       }
       resultDiv.textContent = predictionText;
     } catch (e) {
-      loader.style.display = "none";
       inflight = false;
       resultDiv.textContent = "Prediction failed";
       resultDiv.style.color = "orange";
@@ -204,7 +180,6 @@
   startBtn.onclick = () => {
     startBtn.disabled = true;
     stopBtn.disabled = false;
-    loader.style.display = "block";
 
     frames = [];
     sensors = [];
@@ -277,7 +252,6 @@
     faceBoxesClip = [];
     startBtn.disabled = false;
     stopBtn.disabled = true;
-    loader.style.display = "none";
     fpsCounter.textContent = "FPS: 0";
   };
 </script>
