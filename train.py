@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
 import argparse
+import json
 
 from model import MultiModalLivenessModel
 from dataset import LivenessDataset
@@ -55,6 +56,16 @@ def main(args):
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
 
     best_val_loss = float('inf')
+    
+    # History tracking
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "accuracy": [],
+        "precision": [],
+        "recall": [],
+        "f1_score": []
+    }
 
     # --- Training Loop ---
     for epoch in range(args.epochs):
@@ -83,6 +94,10 @@ def main(args):
         val_loss = 0.0
         correct = 0
         total = 0
+        true_positives = 0
+        false_positives = 0
+        false_negatives = 0
+
         with torch.no_grad():
             for image_clip, sensor_clip, labels in tqdm(val_loader, desc="Validating"):
                 image_clip = image_clip.to(device)
@@ -96,10 +111,31 @@ def main(args):
                 predicted = torch.sigmoid(outputs) > 0.5
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
+                
+                # F1 Score metrics
+                true_positives += ((predicted == 1) & (labels == 1)).sum().item()
+                false_positives += ((predicted == 1) & (labels == 0)).sum().item()
+                false_negatives += ((predicted == 0) & (labels == 1)).sum().item()
 
         avg_val_loss = val_loss / len(val_loader)
         accuracy = 100 * correct / total
+
+        # Calculate Precision, Recall, and F1 Score
+        epsilon = 1e-7
+        precision = true_positives / (true_positives + false_positives + epsilon)
+        recall = true_positives / (true_positives + false_negatives + epsilon)
+        f1_score = 2 * (precision * recall) / (precision + recall + epsilon)
+
         print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.2f}%")
+        print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}")
+
+        # Log history
+        history["train_loss"].append(avg_train_loss)
+        history["val_loss"].append(avg_val_loss)
+        history["accuracy"].append(accuracy)
+        history["precision"].append(precision)
+        history["recall"].append(recall)
+        history["f1_score"].append(f1_score)
 
         # Save the best model
         if avg_val_loss < best_val_loss:
@@ -108,6 +144,12 @@ def main(args):
             print(f"✅ Model saved to {args.model_save_path} (Val Loss: {best_val_loss:.4f})")
 
     print("\n--- Training Complete ---")
+    
+    # Save history to a file
+    history_path = 'training_history.json'
+    with open(history_path, 'w') as f:
+        json.dump(history, f, indent=4)
+    print(f"✅ Training history saved to {history_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a multi-modal liveness detection model.")
