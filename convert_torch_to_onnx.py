@@ -22,10 +22,6 @@ def main():
     dummy_image = torch.randn(batch_size, clip_length, 3, 224, 224)
     dummy_sensor = torch.randn(batch_size, clip_length, 8)
 
-    # Create initial hidden and cell states for LSTM
-    h0 = torch.zeros(2, batch_size, 128)
-    c0 = torch.zeros(2, batch_size, 128)
-
     # Export with fixed shapes and simplified settings
     torch.onnx.export(
         model,

@@ -8,6 +8,7 @@ import os
 import argparse
 import json
 
+# Make sure these match your actual file names
 from model import MultiModalLivenessModel
 from dataset import LivenessDataset
 
@@ -17,67 +18,54 @@ TRAIN_DIR = os.path.join(DATA_DIR, "train")
 VAL_DIR = os.path.join(DATA_DIR, "test")
 
 def main(args):
-    # Determine if the OS is Windows, as it affects num_workers
+    # 1. Setup Device & Workers
     is_windows = os.name == 'nt'
     num_workers = 0 if is_windows else 4
-    print(f"OS: {os.name}, Using {num_workers} workers for DataLoader.")
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    print(f"🖥️  OS: {os.name} | Workers: {num_workers} | Device: {device}")
 
-    # --- Datasets and Dataloaders ---
-    print("Loading datasets...")
-    # Note: We no longer pass a CSV file path
+    # 2. Load Datasets
+    if not os.path.exists(TRAIN_DIR):
+        print(f"❌ Error: Training directory '{TRAIN_DIR}' not found.")
+        return
+
     train_dataset = LivenessDataset(root_dir=TRAIN_DIR, clip_length=args.clip_length)
     val_dataset = LivenessDataset(root_dir=VAL_DIR, clip_length=args.clip_length)
-
-    # Check if datasets are empty
-    if len(train_dataset) == 0 or len(val_dataset) == 0:
-        print("Error: Training or validation dataset is empty.")
-        print(f"Please check the following directories for data: '{TRAIN_DIR}' and '{VAL_DIR}'")
-        return
+    
+    print(f"📂 Found {len(train_dataset)} training clips and {len(val_dataset)} validation clips.")
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True if not is_windows else False # pin_memory can be problematic on Windows
+        pin_memory=not is_windows
     )
     val_loader = DataLoader(
         val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=num_workers
     )
 
-    print(f"Found {len(train_dataset)} training clips and {len(val_dataset)} validation clips.")
-
-    # --- Model, Loss, and Optimizer ---
-    model = MultiModalLivenessModel().to(device)
-    criterion = nn.BCEWithLogitsLoss() # Numerically stable
+    # 3. Initialize Model (Unrolled LSTM version)
+    model = MultiModalLivenessModel(lstm_hidden_dim=128).to(device)
+    
+    # BCEWithLogitsLoss is standard for binary classification (Real vs Fake)
+    criterion = nn.BCEWithLogitsLoss() 
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
 
     best_val_loss = float('inf')
-    
-    # History tracking
-    history = {
-        "train_loss": [],
-        "val_loss": [],
-        "accuracy": [],
-        "precision": [],
-        "recall": [],
-        "f1_score": []
-    }
+    history = {"train_loss": [], "val_loss": [], "accuracy": []}
 
-    # --- Training Loop ---
+    # 4. Training Loop
     for epoch in range(args.epochs):
-        print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
+        print(f"\n--- ⏳ Epoch {epoch+1}/{args.epochs} ---")
 
-        # Training phase
+        # --- Train ---
         model.train()
         train_loss = 0.0
         for image_clip, sensor_clip, labels in tqdm(train_loader, desc="Training"):
             image_clip = image_clip.to(device)
             sensor_clip = sensor_clip.to(device)
-            labels = labels.to(device).unsqueeze(1)
+            labels = labels.to(device).unsqueeze(1) # [Batch, 1]
 
             optimizer.zero_grad()
             outputs = model(image_clip, sensor_clip)
@@ -87,17 +75,13 @@ def main(args):
             train_loss += loss.item()
 
         avg_train_loss = train_loss / len(train_loader)
-        print(f"Average Training Loss: {avg_train_loss:.4f}")
 
-        # Validation phase
+        # --- Validate ---
         model.eval()
         val_loss = 0.0
         correct = 0
         total = 0
-        true_positives = 0
-        false_positives = 0
-        false_negatives = 0
-
+        
         with torch.no_grad():
             for image_clip, sensor_clip, labels in tqdm(val_loader, desc="Validating"):
                 image_clip = image_clip.to(device)
@@ -108,56 +92,35 @@ def main(args):
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
 
+                # Sigmoid to get probability -> Round to 0 or 1
                 predicted = torch.sigmoid(outputs) > 0.5
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-                
-                # F1 Score metrics
-                true_positives += ((predicted == 1) & (labels == 1)).sum().item()
-                false_positives += ((predicted == 1) & (labels == 0)).sum().item()
-                false_negatives += ((predicted == 0) & (labels == 1)).sum().item()
 
         avg_val_loss = val_loss / len(val_loader)
-        accuracy = 100 * correct / total
+        accuracy = 100 * correct / total if total > 0 else 0
 
-        # Calculate Precision, Recall, and F1 Score
-        epsilon = 1e-7
-        precision = true_positives / (true_positives + false_positives + epsilon)
-        recall = true_positives / (true_positives + false_negatives + epsilon)
-        f1_score = 2 * (precision * recall) / (precision + recall + epsilon)
+        print(f"📉 Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | ✅ Accuracy: {accuracy:.2f}%")
 
-        print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.2f}%")
-        print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1_score:.4f}")
-
-        # Log history
-        history["train_loss"].append(avg_train_loss)
-        history["val_loss"].append(avg_val_loss)
-        history["accuracy"].append(accuracy)
-        history["precision"].append(precision)
-        history["recall"].append(recall)
-        history["f1_score"].append(f1_score)
-
-        # Save the best model
+        # Save Checkpoint
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), args.model_save_path)
-            print(f"✅ Model saved to {args.model_save_path} (Val Loss: {best_val_loss:.4f})")
+            print(f"💾 Best model saved to {args.model_save_path}")
 
-    print("\n--- Training Complete ---")
-    
-    # Save history to a file
-    history_path = 'training_history.json'
-    with open(history_path, 'w') as f:
-        json.dump(history, f, indent=4)
-    print(f"✅ Training history saved to {history_path}")
+        history["train_loss"].append(avg_train_loss)
+        history["val_loss"].append(avg_val_loss)
+        history["accuracy"].append(accuracy)
+
+    with open('training_history.json', 'w') as f:
+        json.dump(history, f)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train a multi-modal liveness detection model.")
-    parser.add_argument('--model-save-path', type=str, default='liveness_model.pth', help='Path to save the trained model.')
-    parser.add_argument('--batch-size', type=int, default=4, help='Batch size for training.')
-    parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs.')
-    parser.add_argument('--learning-rate', type=float, default=1e-4, help='Learning rate for the optimizer.')
-    parser.add_argument('--clip-length', type=int, default=10, help='Number of frames per clip.')
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model-save-path', type=str, default='liveness_model.pth')
+    parser.add_argument('--batch-size', type=int, default=4)
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--learning-rate', type=float, default=1e-4)
+    parser.add_argument('--clip-length', type=int, default=10)
     args = parser.parse_args()
     main(args)

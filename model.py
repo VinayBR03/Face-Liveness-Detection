@@ -56,12 +56,10 @@ class MultiModalLivenessModel(nn.Module):
             nn.ReLU()
         )
         
-        # Single-layer LSTM with fixed size
-        self.lstm = nn.LSTM(
+        # --- Use LSTMCell for manual unrolling ---
+        self.lstm_cell = nn.LSTMCell(
             input_size=lstm_hidden_dim,
             hidden_size=lstm_hidden_dim,
-            num_layers=1,
-            batch_first=True
         )
         
         # Simple classifier
@@ -91,16 +89,20 @@ class MultiModalLivenessModel(nn.Module):
         # Prepare for LSTM
         lstm_input = self.pre_lstm(combined)
         
-        # Initialize LSTM states
-        h0 = torch.zeros(1, batch_size, self.lstm_hidden_dim, device=lstm_input.device)
-        c0 = torch.zeros(1, batch_size, self.lstm_hidden_dim, device=lstm_input.device)
+        # --- MANUAL LSTM UNROLLING ---
+        # Initialize hidden and cell states
+        # Shape: [Batch, Hidden_Dim]
+        h = torch.zeros(batch_size, self.lstm_hidden_dim, device=lstm_input.device)
+        c = torch.zeros(batch_size, self.lstm_hidden_dim, device=lstm_input.device)
         
-        # LSTM forward pass
-        lstm_out, _ = self.lstm(lstm_input, (h0, c0))
+        # Loop through the sequence dimension (clip_length)
+        # This explicit loop is what fixes the TFLite error!
+        for t in range(clip_length):
+            step_input = lstm_input[:, t, :] # Get input for time step t
+            h, c = self.lstm_cell(step_input, (h, c))
         
-        # Use final timestep for classification
-        final_features = lstm_out[:, -1, :]
-        output = self.classifier(final_features)
+        # 7. Classification
+        # We use 'h' from the last step, which represents the final state
+        output = self.classifier(h)
         
         return output
-
