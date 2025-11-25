@@ -98,7 +98,7 @@ def sigmoid(x):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
-    ap.add_argument("--model", default="liveness_model_fp32.tflite", help="Path to the TFLite model file.")
+    ap.add_argument("--model", default="liveness_model_int8.tflite", help="Path to the TFLite model file.")
     args = ap.parse_args()
 
     interpreter = load_interpreter(args.model)
@@ -118,8 +118,20 @@ def main():
     print(f"[DEBUG] Prepared image_clip {img.shape}, sensor_clip {sen.shape}")
     print(f"[DEBUG] Model expects image {img_in['shape']}, sensor {sen_in['shape']}")
 
-    interpreter.set_tensor(sen_in["index"], sen)
+    # --- Quantize inputs if the model is INT8 ---
+    img_scale, img_zero = img_in.get("quantization", (0.0, 0))
+    if img_scale > 0.0:
+        img = (img / img_scale + img_zero).astype(np.int8)
+
+    sen_scale, sen_zero = sen_in.get("quantization", (0.0, 0))
+    if sen_scale > 0.0:
+        sen = (sen / sen_scale + sen_zero).astype(np.int8)
+
+    # Set tensors
     interpreter.set_tensor(img_in["index"], img)
+    interpreter.set_tensor(sen_in["index"], sen)
+
+    # Run inference
     interpreter.invoke()
 
     raw_output = interpreter.get_tensor(out["index"]).reshape(-1)[0]
@@ -128,7 +140,7 @@ def main():
     scale, zero_point = out.get("quantization", (0.0, 0))
     if scale > 0.0:
         logit = (float(raw_output) - zero_point) * scale
-        print(f"Raw quantized output: {raw_output}")
+        print(f"[DEBUG] Raw quantized output: {raw_output}, Dequantized: {logit:.4f}")
     else:
         logit = float(raw_output)
 

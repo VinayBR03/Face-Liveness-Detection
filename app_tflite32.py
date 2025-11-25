@@ -12,7 +12,7 @@ from tensorflow.lite.python.interpreter import Interpreter
 app = Flask(__name__)
 
 # ------------------ Config ------------------
-MODEL_PATH = "liveness_model_int8.tflite"
+MODEL_PATH = "liveness_model_fp32.tflite"  # keep this name even if the model has FP16 weights
 CLIP_LENGTH = 10
 SENSOR_DIM = 8
 
@@ -173,30 +173,13 @@ def predict():
         print(f"[DEBUG] prepared img_clip {img_clip.shape}, sensor_clip {sensor_np.shape}")
         print(f"[DEBUG] model expects img {img_input_detail['shape']}, sensor {sensor_input_detail['shape']}")
 
-        # --- Quantize inputs if the model is INT8 ---
-        img_scale, img_zero = img_input_detail.get("quantization", (0.0, 0))
-        if img_scale > 0.0:
-            img_clip = (img_clip / img_scale + img_zero).astype(np.int8)
-
-        sen_scale, sen_zero = sensor_input_detail.get("quantization", (0.0, 0))
-        if sen_scale > 0.0:
-            sensor_np = (sensor_np / sen_scale + sen_zero).astype(np.int8)
-
         # Set tensors by the discovered indices (do NOT assume order)
         interpreter.set_tensor(sensor_input_detail["index"], sensor_np)
         interpreter.set_tensor(img_input_detail["index"], img_clip)
         interpreter.invoke()
 
-        raw_output = interpreter.get_tensor(output_details[0]["index"])[0][0]
-
-        # --- Dequantize the output if necessary ---
-        out_scale, out_zero = output_details[0].get("quantization", (0.0, 0))
-        if out_scale > 0.0:
-            logit = (float(raw_output) - out_zero) * out_scale
-        else:
-            logit = float(raw_output)
-
-        liveness = safe_sigmoid(logit)
+        score = interpreter.get_tensor(output_details[0]["index"])[0][0]
+        liveness = safe_sigmoid(score)
         result = "Real Face" if liveness > 0.5 else "Fake Face"
 
         return jsonify({"liveness_score": float(liveness), "result": result})

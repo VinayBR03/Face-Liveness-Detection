@@ -49,6 +49,8 @@ def convert_onnx_to_tflite(onnx_path, tflite_path):
         shutil.rmtree(tf_model_path)
     
     print(f"Model successfully converted and saved to {tflite_path}")
+    print(f"   Original ONNX size: {os.path.getsize(onnx_path) / 1e6:.2f} MB")
+    print(f"   TFLite size: {os.path.getsize(tflite_path) / 1e6:.2f} MB")
 
 if __name__ == "__main__":
     # Paths configuration

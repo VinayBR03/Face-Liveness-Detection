@@ -14,8 +14,7 @@ cvzone==1.6.1
 onnx==1.16.1
 onnx-tf==1.10.0
 tf2onnx==1.16.0
-onnxsim==0.4.36
-onnx2tf==1.20.3
+onnxsim==0.4.36 
 --extra-index-url https://pypi.ngc.nvidia.com onnx-graphsurgeon==0.3.26
 tensorflow-probability==0.20.1
 
