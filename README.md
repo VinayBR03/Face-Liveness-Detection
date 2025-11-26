@@ -17,6 +17,7 @@ A multi-modal deep learning system for detecting face liveness (real vs. spoofed
 - [Requirements](#requirements)
 - [License](#license)
 
+<a id="overview"></a>
 ## 🎯 Overview
 
 This project implements a **multi-modal liveness detection system** that combines:
@@ -35,6 +36,15 @@ The model distinguishes between:
 - **Web Interface**: Flask-based REST API for easy integration
 - **Real-Time Inference**: Supports video stream processing
 
+<a id="features"></a>
+## Features
+
+- **Multi-Modal Fusion**: Leverages both image and sensor data for robust liveness detection
+- **Quantized Models**: INT8 quantization for efficient inference on mobile devices
+- **Web API**: Easy integration with existing applications via RESTful API
+- **Real-Time Performance**: Designed for low-latency inference on video streams
+
+<a id="project-structure"></a>
 ## 📁 Project Structure
 
 ```
@@ -78,6 +88,7 @@ The model distinguishes between:
 └── README.md
 ```
 
+<a id="installation"></a>
 ## 🚀 Installation
 
 ### Prerequisites
@@ -98,6 +109,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+<a id="dataset"></a>
 ## 📊 Dataset
 
 ### Expected Structure
@@ -128,6 +140,7 @@ data/
 - Color jitter (brightness, contrast, saturation)
 - Resize to 224×224
 
+<a id="training"></a>
 ## 🏋️ Training
 
 Train the model using the provided training script:
@@ -161,6 +174,7 @@ Generates:
 - Confusion matrix on test set
 - Performance metrics (precision, recall, F1-score)
 
+<a id="model-conversion"></a>
 ## 🔄 Model Conversion Pipeline
 
 ### 1️⃣ PyTorch → ONNX
@@ -199,6 +213,7 @@ python convert_onnx_to_tflite_int8.py
 | TFLite FP32 | TFLite | ~5-8 MB | ⚠️ Medium | ⭐⭐⭐ | ✅ Native |
 | TFLite INT8 | TFLite | ~1.5-2 MB | ✅ Fast | ⭐⭐⭐ | ✅ Recommended |
 
+<a id="deployment"></a>
 ## 📱 Deployment
 
 ### Option 1: Flask Web Server (Development/Testing)
@@ -233,6 +248,7 @@ python predict_video.py --video your_video.mp4
 python predict_video_onnx.py --video your_video.mp4 --onnx liveness_model.onnx
 ```
 
+<a id="api-endpoints"></a>
 ## 🔌 API Endpoints
 
 ### Base URL
@@ -294,6 +310,7 @@ Score > 0.5 → Real Face | Score ≤ 0.5 → Fake Face
 
 Opens interactive web interface at `http://localhost:5000`
 
+<a id="performance"></a>
 ## 📈 Performance
 
 ### Model Metrics
@@ -312,6 +329,7 @@ Opens interactive web interface at `http://localhost:5000`
 - **Storage**: ~2-5 MB (INT8 model)
 - **Processing**: Snapdragon 600+ or equivalent
 
+<a id="requirements"></a>
 ## 📦 Requirements
 
 See [requirements.txt](requirements.txt):
@@ -339,36 +357,7 @@ Install with:
 pip install -r requirements.txt
 ```
 
-## 🏗️ Model Architecture
-
-The **MultiModalLivenessModel** combines:
-
-1. **Image Stream**:
-   - 3D CNN for spatial-temporal feature extraction
-   - Processes 10×224×224×3 clip
-
-2. **Sensor Stream**:
-   - Fully connected layers for sensor fusion
-   - Processes 10×8 accelerometer/gyroscope data
-
-3. **Fusion**:
-   - Concatenate both feature streams
-   - Final classification layers
-   - Sigmoid activation for binary classification
-
-## 🔍 Model Inputs/Outputs
-
-### Inputs
-| Input | Shape | Format | Range |
-|-------|-------|--------|-------|
-| Image Clip | (1, 10, 3, 224, 224) | float32 | [0, 1] (normalized) |
-| Sensor Clip | (1, 10, 8) | float32 | [-∞, ∞] (raw or normalized) |
-
-### Output
-| Output | Shape | Format | Meaning |
-|--------|-------|--------|---------|
-| Liveness Score | (1, 1) | float32 | [0, 1] via sigmoid |
-
+<a id="license"></a>
 ## 📝 License
 
 This project is licensed under the [MIT License](LICENSE).
