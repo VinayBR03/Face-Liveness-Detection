@@ -5,6 +5,9 @@ flask==3.0.3
 numpy==1.24.3
 opencv-python==4.9.0.80
 Pillow==10.4.0
+torch==2.4.1
+torchvision==0.19.1
+tqdm==4.66.4
 
 # Face Detection and Tracking
 mediapipe==0.10.11

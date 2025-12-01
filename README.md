@@ -69,6 +69,8 @@ The model distinguishes between:
 │   └── index.html                     # Web UI
 ├── static/
 │   └── models/                        # Deployed models directory
+├── images/
+│   └── ...                          # Generated plots and diagrams
 │
 ├── data/
 │   ├── train/

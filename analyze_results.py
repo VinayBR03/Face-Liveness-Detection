@@ -80,7 +80,7 @@ def plot_data_distribution(data_dir, split_name):
 # 2. Training History Visualization
 # ==========================================
 def plot_training_history(history_path):
-    """Loads training history and plots accuracy and loss vs. epochs."""
+    """Loads training history and plots loss and performance metrics in separate files."""
     if not os.path.exists(history_path):
         print(f"⚠️ History file not found: {history_path}. Skipping history plot.")
         return
@@ -88,43 +88,47 @@ def plot_training_history(history_path):
     with open(history_path, 'r') as f:
         history = json.load(f)
 
-    # Handle cases where history might be empty or partial
-    if not history.get('accuracy'):
+    if not history.get('train_loss'):
         print("⚠️ Training history is empty. Skipping plot.")
         return
 
-    epochs = range(1, len(history['accuracy']) + 1)
-
-    plt.figure(figsize=(14, 6))
-
-    # Loss vs. Epoch
-    plt.subplot(1, 2, 1)
-    # Check if keys exist (older versions of train.py might have different keys)
+    epochs = range(1, len(history['train_loss']) + 1)
     train_loss = history.get('train_loss', [])
     val_loss = history.get('val_loss', [])
-    
+    accuracy = history.get('accuracy', [])
+    precision = history.get('precision', [])
+    f1_score = history.get('f1_score', [])
+    roc_auc = history.get('roc_auc', [])
+
+    # --- Plot 1: Loss History ---
+    plt.figure(figsize=(8, 6))
     if train_loss: plt.plot(epochs, train_loss, 'b-', label='Training Loss')
     if val_loss: plt.plot(epochs, val_loss, 'r-', label='Validation Loss')
-    
+
     plt.title('Loss vs. Epoch', fontsize=16)
     plt.xlabel('Epoch', fontsize=12)
     plt.ylabel('Loss', fontsize=12)
     plt.legend()
     plt.grid(True)
+    plt.tight_layout()
+    save_plot("training_loss_history.png")
 
-    # Accuracy vs. Epoch
-    plt.subplot(1, 2, 2)
-    accuracy = history.get('accuracy', [])
-    if accuracy: plt.plot(epochs, accuracy, 'go-', label='Validation Accuracy')
-    
-    plt.title('Accuracy vs. Epoch', fontsize=16)
+    # --- Plot 2: Performance Metrics History ---
+    plt.figure(figsize=(8, 6))
+    accuracy_scaled = [acc / 100.0 for acc in accuracy] # Scale accuracy to [0, 1]
+    if accuracy_scaled: plt.plot(epochs, accuracy_scaled, 'g-o', label='Accuracy', markersize=4)
+    if precision: plt.plot(epochs, precision, 'c-^', label='Precision', markersize=4)
+    if f1_score: plt.plot(epochs, f1_score, 'm-s', label='F1-Score', markersize=4)
+    if roc_auc: plt.plot(epochs, roc_auc, 'y-d', label='ROC AUC', markersize=4)
+
+    plt.title('Performance Metrics vs. Epoch', fontsize=16)
     plt.xlabel('Epoch', fontsize=12)
-    plt.ylabel('Accuracy (%)', fontsize=12)
+    plt.ylabel('Score', fontsize=12)
+    plt.ylim(0.8, 1.01) # Zoom in on the high-performance range
     plt.legend()
     plt.grid(True)
-
     plt.tight_layout()
-    save_plot("training_history.png")
+    save_plot("training_metrics_history.png")
 
 # ==========================================
 # 3. Model Evaluation & Confusion Matrices
