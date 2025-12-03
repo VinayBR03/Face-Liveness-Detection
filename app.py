@@ -7,7 +7,11 @@ from flask import Flask, render_template, request, jsonify
 import cv2
 
 from cvzone.FaceDetectionModule import FaceDetector
-from tensorflow.lite.python.interpreter import Interpreter
+try:
+    from tflite_runtime.interpreter import Interpreter
+except:
+    from tensorflow.lite.python.interpreter import Interpreter
+
 
 app = Flask(__name__)
 
