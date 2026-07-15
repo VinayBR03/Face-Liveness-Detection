@@ -20,7 +20,7 @@ COPY requirements.txt .
 # 4. Install Python dependencies
 # --no-cache-dir reduces image size by not saving downloaded wheel files
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements-prod.txt
 
 # 5. Copy the rest of the application code
 COPY . .
