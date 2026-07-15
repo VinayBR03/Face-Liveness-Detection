@@ -1,0 +1,19 @@
+# Flask Web Framework & Server
+flask==3.0.3
+gunicorn==21.2.0
+
+# Core Utilities
+numpy==1.24.3
+Pillow==10.4.0
+requests==2.32.3
+protobuf==3.20.3
+
+# Headless Computer Vision
+opencv-python-headless==4.9.0.80
+
+# Face Detection and Tracking
+mediapipe==0.10.11
+cvzone==1.6.1
+
+# Lightweight Inference Engine
+tflite-runtime==2.14.0
