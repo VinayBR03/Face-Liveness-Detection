@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # 3. Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+COPY requirements-prod.txt .
 
 # 4. Install Python dependencies
 # --no-cache-dir reduces image size by not saving downloaded wheel files
