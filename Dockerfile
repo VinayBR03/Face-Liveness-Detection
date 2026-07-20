@@ -30,4 +30,4 @@ EXPOSE 8080
 
 # 7. Define the command to run the app using Gunicorn
 # Cloud Run injects the $PORT environment variable automatically
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 1 --timeout 0 app:app
