@@ -87,7 +87,7 @@ print(f"Sensor quantized: {IS_SEN_QUANTIZED}")
 print(f"Image quantized: {IS_IMG_QUANTIZED}, Sensor quantized: {IS_SEN_QUANTIZED}")
 
 # ------------------ Detector ------------------
-detector = FaceDetector(minDetectionCon=0.7)
+#detector = FaceDetector(minDetectionCon=0.7)
 
 # ------------------ Optimized Preprocessing ------------------
 # Pre-compute normalization constants
@@ -225,33 +225,75 @@ def index():
 
 @app.route("/detect", methods=["POST"])
 def detect():
+    # Create a fresh detector for each request
+    detector = FaceDetector(minDetectionCon=0.7)
+
     try:
         data = request.get_json()
+
         if not data or "image" not in data:
             return jsonify({"error": "Missing frame data"}), 400
 
         frame_b64 = data["image"].split(",")[-1]
         img_bytes = base64.b64decode(frame_b64)
+
         npimg = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
 
+        if frame is None:
+            return jsonify({"error": "Invalid image"}), 400
+
         img, bboxs = detector.findFaces(frame, draw=False)
+
         faces = []
+
         if bboxs:
             for bbox in bboxs:
                 x, y, w, h = bbox["bbox"]
-                faces.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
-        out = frame.copy()
-        for f in faces:
-            cv2.rectangle(out, (f["x"], f["y"]), 
-                         (f["x"] + f["w"], f["y"] + f["h"]), (0, 255, 0), 2)
-        _, buffer = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                faces.append({
+                    "x": int(x),
+                    "y": int(y),
+                    "w": int(w),
+                    "h": int(h)
+                })
+
+                cv2.rectangle(
+                    img,
+                    (int(x), int(y)),
+                    (int(x + w), int(y + h)),
+                    (0, 255, 0),
+                    2
+                )
+
+        _, buffer = cv2.imencode(
+            ".jpg",
+            img,
+            [cv2.IMWRITE_JPEG_QUALITY, 90]
+        )
+
         encoded = base64.b64encode(buffer).decode("utf-8")
-        return jsonify({"faces": faces, "image": f"data:image/jpeg;base64,{encoded}"})
+
+        return jsonify({
+            "faces": faces,
+            "image": f"data:image/jpeg;base64,{encoded}"
+        })
+
     except Exception as e:
         print(f"Detection Error: {e}")
-        return jsonify({"error": "Detection failed"}), 500
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "error": "Detection failed"
+        }), 500
+
+    finally:
+        # Properly release the MediaPipe graph
+        try:
+            detector.detector.close()
+        except Exception:
+            pass
 
 @app.route("/predict", methods=["POST"])
 def predict():
