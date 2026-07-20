@@ -161,7 +161,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model-save-path', type=str, default='liveness_model.pth')
+    parser.add_argument('--model-save-path', type=str, default=os.path.join("models", 'liveness_model.pth'))
     parser.add_argument('--batch-size', type=int, default=4)
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--learning-rate', type=float, default=1e-4)

@@ -7,16 +7,13 @@ from flask import Flask, render_template, request, jsonify
 import cv2
 
 from cvzone.FaceDetectionModule import FaceDetector
-try:
-    from tflite_runtime.interpreter import Interpreter
-except:
-    from tensorflow.lite.python.interpreter import Interpreter
+from tensorflow.lite.python.interpreter import Interpreter
 
 
 app = Flask(__name__)
 
 # ------------------ Config ------------------
-MODEL_PATH = "liveness_model_int8.tflite"
+MODEL_PATH = os.path.join('models', "liveness_model_int8.tflite")
 CLIP_LENGTH = 10
 SENSOR_DIM = 8
 
@@ -71,7 +68,21 @@ IS_SEN_QUANTIZED = sen_scale > 0.0
 IS_OUT_QUANTIZED = out_scale > 0.0
 
 img_shape = img_input_detail["shape"]
-EXPECTS_NCHW_TIME = (len(img_shape) == 5 and img_shape[2] == 3)
+
+# Detect image layout automatically
+if len(img_shape) != 5:
+    raise RuntimeError(f"Unexpected image input shape: {img_shape}")
+
+if img_shape[1] == 3:
+    IMAGE_LAYOUT = "BCHWT"      # (B,C,H,W,T)
+elif img_shape[4] == 3:
+    IMAGE_LAYOUT = "BTHWC"      # (B,T,H,W,C)
+else:
+    raise RuntimeError(f"Unknown image layout: {img_shape}")
+
+print(f"Detected image layout: {IMAGE_LAYOUT}")
+print(f"Image quantized: {IS_IMG_QUANTIZED}")
+print(f"Sensor quantized: {IS_SEN_QUANTIZED}")
 
 print(f"Image quantized: {IS_IMG_QUANTIZED}, Sensor quantized: {IS_SEN_QUANTIZED}")
 
@@ -95,44 +106,74 @@ if IS_SEN_QUANTIZED:
 
 def preprocess_image_clip_optimized(image_b64_list):
     """
-    Optimized preprocessing that minimizes conversions and combines operations.
-    Returns quantized INT8 directly if model expects it, otherwise FP32.
+    Returns image tensor in the layout expected by the TFLite model.
     """
+
     frames = []
+
     for b64_img in image_b64_list:
         try:
             raw = b64_img.split(",")[-1]
-            img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGB")
-            img = img.resize((224, 224), Image.BILINEAR)  # Faster than default
-            
-            # Convert to numpy and normalize in one go
+
+            img = Image.open(
+                io.BytesIO(base64.b64decode(raw))
+            ).convert("RGB")
+
+            img = img.resize((224, 224), Image.BILINEAR)
+
             arr = np.asarray(img, dtype=np.float32)
             arr = (arr / 255.0 - IM_MEAN) / IM_STD
-            frames.append(arr)
-        except Exception as e:
-            print(f"Frame decode error: {e}")
-            continue
 
-    if not frames:
+            frames.append(arr)
+
+        except Exception as e:
+            print(e)
+
+    if len(frames) == 0:
         return None
 
-    # Stack frames efficiently
+    # frames:
+    # (T,H,W,C)
+
     clip = np.stack(frames, axis=0)
 
-    # Transpose if needed
-    if EXPECTS_NCHW_TIME:
-        clip = np.transpose(clip, (0, 3, 1, 2))
-        clip = clip[np.newaxis, ...]
+    if IMAGE_LAYOUT == "BCHWT":
+
+        # (T,H,W,C) -> (1,C,H,W,T)
+
+        clip = np.transpose(
+            clip,
+            (3, 1, 2, 0)
+        )
+
+        clip = np.expand_dims(
+            clip,
+            axis=0
+        )
+
     else:
-        clip = clip[np.newaxis, ...]
-    
-    # Quantize directly if needed (avoid separate step later)
+
+        # (T,H,W,C) -> (1,T,H,W,C)
+
+        clip = np.expand_dims(
+            clip,
+            axis=0
+        )
+
     if IS_IMG_QUANTIZED:
+
         clip = np.clip(
-            np.round(clip * IMG_QUANT_SCALE + IMG_QUANT_ZERO),
-            -128, 127
+            np.round(
+                clip / img_scale + img_zero
+            ),
+            -128,
+            127
         ).astype(np.int8)
-    
+
+    else:
+
+        clip = clip.astype(np.float32)
+
     return clip
 
 def prepare_sensor_clip_optimized(sensor_clip):
@@ -228,6 +269,12 @@ def predict():
             return jsonify({"error": "Failed to preprocess images"}), 400
 
         sensor_np = prepare_sensor_clip_optimized(sensor_clip)
+
+        print("Expected image :", img_input_detail["shape"])
+        print("Actual image   :", img_clip.shape)
+
+        print("Expected sensor:", sensor_input_detail["shape"])
+        print("Actual sensor  :", sensor_np.shape)
 
         # Set tensors directly (already quantized if needed)
         interpreter.set_tensor(img_input_detail["index"], img_clip)

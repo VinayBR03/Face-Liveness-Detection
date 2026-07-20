@@ -18,17 +18,21 @@ A multi-modal deep learning system for detecting face liveness (real vs. spoofed
 - [License](#license)
 
 <a id="overview"></a>
+
 ## 🎯 Overview
 
 This project implements a **multi-modal liveness detection system** that combines:
+
 - **Visual Features**: CNN processing of video frames (224×224 RGB images)
 - **Sensor Data**: Accelerometer and gyroscope readings (8-dimensional sensor vectors)
 
 The model distinguishes between:
+
 - ✅ **Real Faces**: Actual human faces
 - ❌ **Spoofed/Fake Faces**: Printed photos, videos, masks, or other spoofing attempts
 
 ### Key Features
+
 - **Mobile-First Design**: Models optimized for TFLite (both FP32 and INT8 quantized)
 - **Multi-Modal Learning**: Combines visual and sensor modalities for improved accuracy
 - **PyTorch Training**: Full training pipeline with data augmentation
@@ -37,6 +41,7 @@ The model distinguishes between:
 - **Real-Time Inference**: Supports video stream processing
 
 <a id="features"></a>
+
 ## Features
 
 - **Multi-Modal Fusion**: Leverages both image and sensor data for robust liveness detection
@@ -45,9 +50,11 @@ The model distinguishes between:
 - **Real-Time Performance**: Designed for low-latency inference on video streams
 
 <a id="project-structure"></a>
+
 ## 📁 Project Structure
 
-```
+```bash
+
 .
 ├── model.py                       # MultiModalLivenessModel architecture
 ├── dataset.py                         # LivenessDataset loader
@@ -80,10 +87,11 @@ The model distinguishes between:
 │       ├── real/                      # Testing real face images
 │       └── fake/                      # Testing spoofed images
 │
-├── liveness_model.pth                # Trained PyTorch model
-├── liveness_model.onnx               # ONNX format model
-├── liveness_model_fp32.tflite        # TFLite FP32 model (~5-8 MB)
-├── liveness_model_int8.tflite        # TFLite INT8 quantized (~1.5-2 MB)
+├── models/
+│   ├── liveness_model.pth                # Trained PyTorch model
+│   ├── liveness_model.onnx               # ONNX format model
+│   ├── liveness_model_fp32.tflite        # TFLite FP32 model (~5-8 MB)
+│   └── liveness_model_int8.tflite        # TFLite INT8 quantized (~1.5-2 MB)
 │
 ├── requirements.txt                   # Python dependencies
 ├── LICENSE
@@ -91,10 +99,12 @@ The model distinguishes between:
 ```
 
 <a id="installation"></a>
+
 ## 🚀 Installation
 
 ### Prerequisites
-- Python 3.10
+
+- Python 3.12
 - CUDA 11.0+ (for GPU training, optional)
 
 ### Setup
@@ -112,10 +122,12 @@ pip install -r requirements.txt
 ```
 
 <a id="dataset"></a>
+
 ## 📊 Dataset
 
 ### Expected Structure
-```
+
+```text
 data/
 ├── train/
 │   ├── real/
@@ -138,11 +150,13 @@ data/
 - **Normalization**: ImageNet statistics (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
 ### Data Augmentation (Training Only)
+
 - Random horizontal flips
 - Color jitter (brightness, contrast, saturation)
 - Resize to 224×224
 
 <a id="training"></a>
+
 ## 🏋️ Training
 
 Train the model using the provided training script:
@@ -159,6 +173,7 @@ python train.py \
 ```
 
 ### Training Output
+
 - `liveness_model.pth` - Best model weights
 - `training_history.json` - Loss & accuracy logs
 
@@ -172,11 +187,13 @@ python analyze_results.py \
 ```
 
 Generates:
+
 - Training loss/accuracy plots
 - Confusion matrix on test set
 - Performance metrics (precision, recall, F1-score)
 
 <a id="model-conversion"></a>
+
 ## 🔄 Model Conversion Pipeline
 
 ### 1️⃣ PyTorch → ONNX
@@ -209,13 +226,14 @@ python convert_onnx_to_tflite_int8.py
 ### Model Comparison
 
 | Model | Format | Size | Speed | Accuracy | Mobile |
-|-------|--------|------|-------|----------|--------|
+| ------- | -------- | ------ | ------- | ---------- | -------- |
 | Full Precision | PyTorch | ~10 MB | ⚠️ Slow | ⭐⭐⭐ | ❌ Large |
 | ONNX | ONNX | ~5-8 MB | ⚠️ Medium | ⭐⭐⭐ | ⚠️ Need runtime |
 | TFLite FP32 | TFLite | ~5-8 MB | ⚠️ Medium | ⭐⭐⭐ | ✅ Native |
 | TFLite INT8 | TFLite | ~1.5-2 MB | ✅ Fast | ⭐⭐⭐ | ✅ Recommended |
 
 <a id="deployment"></a>
+
 ## 📱 Deployment
 
 ### Option 1: Flask Web Server (Development/Testing)
@@ -227,11 +245,13 @@ python app.py
 ```
 
 Or use FP32 model:
+
 ```bash
 python app_tflite32.py
 ```
 
 Or use ONNX model:
+
 ```bash
 python app_onnx.py
 ```
@@ -251,17 +271,21 @@ python predict_video_onnx.py --video your_video.mp4 --onnx liveness_model.onnx
 ```
 
 <a id="api-endpoints"></a>
+
 ## 🔌 API Endpoints
 
 ### Base URL
-```
+
+```text
 http://localhost:5000
 ```
 
 ### 1. Face Detection
+
 **Endpoint**: `POST /detect`
 
 **Request**:
+
 ```json
 {
   "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABA..."
@@ -269,6 +293,7 @@ http://localhost:5000
 ```
 
 **Response**:
+
 ```json
 {
   "faces": [
@@ -279,9 +304,11 @@ http://localhost:5000
 ```
 
 ### 2. Liveness Prediction
+
 **Endpoint**: `POST /predict`
 
 **Request**:
+
 ```json
 {
   "image_clip": [
@@ -298,6 +325,7 @@ http://localhost:5000
 ```
 
 **Response**:
+
 ```json
 {
   "liveness_score": 0.95,
@@ -308,58 +336,46 @@ http://localhost:5000
 Score > 0.5 → Real Face | Score ≤ 0.5 → Fake Face
 
 ### 3. Web UI
+
 **Endpoint**: `GET /`
 
 Opens interactive web interface at `http://localhost:5000`
 
 <a id="performance"></a>
+
 ## 📈 Performance
 
 ### Model Metrics
+
 - **Accuracy**: ~95-98% on test set
 - **Precision**: ~94-97%
 - **Recall**: ~93-96%
 - **F1-Score**: ~94-96%
 
 ### Inference Speed (INT8 TFLite)
+
 - **Per Frame**: ~5-10 ms
 - **Per Clip (10 frames)**: ~50-100 ms
 - **On Mobile**: ~100-200 ms (device dependent)
 
 ### Mobile Device Requirements
+
 - **Memory**: ~50-100 MB RAM
 - **Storage**: ~2-5 MB (INT8 model)
 - **Processing**: Snapdragon 600+ or equivalent
 
 <a id="requirements"></a>
+
 ## 📦 Requirements
 
-See [requirements.txt](requirements.txt):
+All dependencies are listed in the [requirements.txt](requirements.txt) file.
 
-```
-torch>=1.9.0
-torchvision>=0.10.0
-tensorflow>=2.10.0
-onnx>=1.12.0
-onnx-tf>=1.10.0
-onnxruntime>=1.13.0
-opencv-python>=4.5.0
-cvzone>=1.5.0
-numpy>=1.21.0
-Pillow>=8.3.0
-Flask>=2.0.0
-matplotlib>=3.4.0
-seaborn>=0.11.0
-scikit-learn>=0.24.0
-tqdm>=4.62.0
-```
-
-Install with:
-```bash
+```text
 pip install -r requirements.txt
 ```
 
 <a id="license"></a>
+
 ## 📝 License
 
 This project is licensed under the [MIT License](LICENSE).
@@ -374,4 +390,10 @@ For questions or collaboration, reach out via GitHub Issues: [Face-Liveness-Dete
 
 ---
 
-**Last Updated**: 2025
+## Citation
+
+If you find this project useful, please consider giving it a ⭐ on GitHub.
+
+---
+
+Developed by **Vinay B R**

@@ -47,6 +47,7 @@ class MultiModalLivenessModel(nn.Module):
         mobilenet = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.IMAGENET1K_V1)
         self.image_features = nn.Sequential(*list(mobilenet.children())[:-1])
         self.attention = CBAM(image_feature_dim)
+        self.image_feature_dim = image_feature_dim
         
         # First reshape the combined features
         self.pre_lstm = nn.Sequential(
@@ -75,34 +76,39 @@ class MultiModalLivenessModel(nn.Module):
 
     def forward(self, image_clip, sensor_clip):
         batch_size, clip_length, C, H, W = image_clip.shape
-        
-        # Process images
-        image_input = image_clip.reshape(-1, C, H, W)
+
+        # Merge batch and time dimensions
+        image_input = image_clip.flatten(0, 1)
+
+        # CNN feature extraction
         img_feat = self.image_features(image_input)
         img_feat = self.attention(img_feat)
         img_feat = self.adap_pool(img_feat)
-        img_feat = img_feat.reshape(batch_size, clip_length, -1)
-        
-        # Concatenate features
+
+        # Restore sequence dimension
+        img_feat = img_feat.contiguous().view(batch_size, clip_length, -1)
+
+        # Concatenate image and sensor features
         combined = torch.cat((img_feat, sensor_clip), dim=2)
-        
-        # Prepare for LSTM
+
+        # Feature projection before LSTM
         lstm_input = self.pre_lstm(combined)
-        
-        # --- MANUAL LSTM UNROLLING ---
+
         # Initialize hidden and cell states
-        # Shape: [Batch, Hidden_Dim]
-        h = torch.zeros(batch_size, self.lstm_hidden_dim, device=lstm_input.device)
-        c = torch.zeros(batch_size, self.lstm_hidden_dim, device=lstm_input.device)
-        
-        # Loop through the sequence dimension (clip_length)
-        # This explicit loop is what fixes the TFLite error!
+        h = torch.zeros(
+            batch_size,
+            self.lstm_hidden_dim,
+            device=lstm_input.device,
+            dtype=lstm_input.dtype,
+        )
+
+        c = torch.zeros_like(h)
+
+        # Manual LSTM unrolling
         for t in range(clip_length):
-            step_input = lstm_input[:, t, :] # Get input for time step t
-            h, c = self.lstm_cell(step_input, (h, c))
-        
-        # 7. Classification
-        # We use 'h' from the last step, which represents the final state
+            h, c = self.lstm_cell(lstm_input[:, t], (h, c))
+
+        # Final classifier
         output = self.classifier(h)
-        
+
         return output

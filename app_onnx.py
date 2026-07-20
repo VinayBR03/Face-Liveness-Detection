@@ -11,7 +11,7 @@ import onnxruntime as ort
 app = Flask(__name__)
 
 # ------------------ Config ------------------
-ONNX_MODEL_PATH = "liveness_model.onnx"   # your working ONNX
+ONNX_MODEL_PATH = os.path.join("models", "liveness_model.onnx")   # your working ONNX
 CLIP_LENGTH = 10                          # must match model/export
 SENSOR_DIM = 8
 

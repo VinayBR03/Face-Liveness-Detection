@@ -1,103 +1,146 @@
 import os
-import shutil
 import argparse
 import numpy as np
 import tensorflow as tf
-import onnx
-from onnx_tf.backend import prepare
-from tqdm import tqdm
 
-# Import your existing dataset loader
-from dataset import LivenessDataset
 from torch.utils.data import DataLoader
+from dataset import LivenessDataset
 
-def representative_dataset_gen(data_dir, num_samples=100):
-    """
-    A generator function that provides a small number of samples
-    to the TFLite converter for calibrating quantization.
-    """
-    print(f"Loading representative dataset from: {data_dir}")
-    dataset = LivenessDataset(root_dir=data_dir, clip_length=10, is_train=False)
-    loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
-    print(f"Providing {min(num_samples, len(dataset))} samples for quantization calibration...")
-    
-    for i, (image_clip, sensor_clip, _) in enumerate(tqdm(loader, desc="Calibration")):
-        if i >= num_samples:
+def representative_dataset(saved_model_dir, data_dir, clip_length=10, num_samples=100):
+    """
+    Representative dataset generator.
+    Automatically matches the SavedModel input names and shapes.
+    """
+
+    # Read SavedModel signature
+    loaded = tf.saved_model.load(saved_model_dir)
+    infer = loaded.signatures["serving_default"]
+    input_specs = infer.structured_input_signature[1]
+
+    print("\nSavedModel Inputs:")
+    for name, spec in input_specs.items():
+        print(f"  {name}: {spec.shape}")
+
+    dataset = LivenessDataset(
+        root_dir=data_dir,
+        clip_length=clip_length,
+        is_train=False,
+    )
+
+    loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=True,
+    )
+
+    count = 0
+
+    for image_clip, sensor_clip, _ in loader:
+
+        image = image_clip.numpy().astype(np.float32)
+        sensor = sensor_clip.numpy().astype(np.float32)
+
+        feed_dict = {}
+
+        for name, spec in input_specs.items():
+
+            shape = tuple(spec.shape)
+
+            # image input
+            if len(shape) == 5:
+
+                # SavedModel expects BCHWT
+                if shape == (1, 3, 224, 224, clip_length):
+                    image = np.transpose(image, (0, 2, 3, 4, 1))
+
+                # SavedModel expects BTCHW
+                elif shape == (1, clip_length, 3, 224, 224):
+                    pass
+
+                else:
+                    raise RuntimeError(
+                        f"Unsupported image shape from SavedModel: {shape}"
+                    )
+
+                feed_dict[name] = image
+
+            # sensor input
+            elif len(shape) == 3:
+                feed_dict[name] = sensor
+
+        if count == 0:
+            print("\nRepresentative Sample")
+            for k, v in feed_dict.items():
+                print(k, v.shape)
+
+        yield feed_dict
+
+        count += 1
+
+        if count >= num_samples:
             break
-        
-        # The converter expects a dictionary mapping input names to numpy arrays.
-        yield {
-            "image_clip": image_clip.numpy().astype(np.float32),
-            "sensor_clip": sensor_clip.numpy().astype(np.float32)
-        }
 
-def convert_onnx_to_int8_tflite(onnx_path, tflite_path, data_dir):
-    """
-    Converts an ONNX model to a fully quantized INT8 TFLite model using onnx-tf.
-    """
-    print(f"📥 Loading ONNX model from: {onnx_path}")
-    onnx_model = onnx.load(onnx_path)
-    onnx.checker.check_model(onnx_model)
-    print("✅ ONNX model checked.")
 
-    # Create a temporary directory for the intermediate SavedModel
-    tf_model_path = "temp_tf_model_for_quant"
-    if os.path.exists(tf_model_path):
-        shutil.rmtree(tf_model_path)
+def convert(saved_model_dir, output_path, data_dir):
 
-    # 1. Convert ONNX to TensorFlow SavedModel using onnx-tf
-    print(f"⚙️ Exporting to intermediate SavedModel format at {tf_model_path}")
-    
-    # --- THE CRITICAL FIX ---
-    # By explicitly providing the input names, we ensure the SavedModel has a
-    # static, well-defined input signature that the TFLite converter can understand.
-    input_names = [node.name for node in onnx_model.graph.input]
-    tf_rep = prepare(onnx_model, input_names=input_names)
-    
-    tf_rep.export_graph(tf_model_path)
-    print("✅ Successfully created intermediate SavedModel.")
+    print("=" * 60)
+    print("Converting SavedModel -> INT8 TFLite")
+    print("=" * 60)
 
-    # 2. Convert the generated SavedModel to INT8 TFLite
-    print("🔄 Converting SavedModel to INT8 TFLite...")
-    converter = tf.lite.TFLiteConverter.from_saved_model(tf_model_path)
+    converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
 
-    # --- This is where the quantization magic happens ---
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    converter.representative_dataset = lambda: representative_dataset_gen(data_dir)
-    
-    # Enforce full integer quantization.
-    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-    
-    # Set the input and output tensors to INT8 for the final model.
+
+    converter.representative_dataset = lambda: representative_dataset(
+        saved_model_dir=saved_model_dir,
+        data_dir=data_dir,
+        clip_length=10,
+        num_samples=100,
+    )
+
+    converter.target_spec.supported_ops = [
+        tf.lite.OpsSet.TFLITE_BUILTINS_INT8
+    ]
+
     converter.inference_input_type = tf.int8
     converter.inference_output_type = tf.int8
 
-    tflite_quant_model = converter.convert()
+    tflite_model = converter.convert()
 
-    # 3. Save the quantized model
-    with open(tflite_path, 'wb') as f:
-        f.write(tflite_quant_model)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    # 4. Clean up the temporary directory
-    shutil.rmtree(tf_model_path)
-    
-    print("-" * 50)
-    print(f"✅ Model successfully converted and saved to {tflite_path}")
-    print(f"   Original ONNX size: {os.path.getsize(onnx_path) / 1e6:.2f} MB")
-    print(f"   Quantized TFLite size: {os.path.getsize(tflite_path) / 1e6:.2f} MB")
-    print("-" * 50)
+    with open(output_path, "wb") as f:
+        f.write(tflite_model)
+
+    print("\nConversion completed successfully!")
+    print(f"Saved : {output_path}")
+    print(f"Size  : {os.path.getsize(output_path)/1024/1024:.2f} MB")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert ONNX to a fully quantized INT8 TFLite model.")
-    parser.add_argument('--onnx-model', type=str, default='liveness_model.onnx', help='Path to the input ONNX model.')
-    parser.add_argument('--tflite-model', type=str, default='liveness_model_int8.tflite', help='Path for the output INT8 TFLite model.')
-    parser.add_argument('--data-dir', type=str, default='data/train', help='Path to the directory containing representative data.')
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--saved-model",
+        default="temp_saved_model",
+    )
+
+    parser.add_argument(
+        "--data-dir",
+        default="data/train",
+    )
+
+    parser.add_argument(
+        "--output-model",
+        default=os.path.join("models", "liveness_model_int8.tflite"),
+    )
+
     args = parser.parse_args()
 
-    if not os.path.exists(args.data_dir):
-        raise FileNotFoundError(f"Data directory not found: {args.data_dir}.")
-    if not os.path.exists(args.onnx_model):
-        raise FileNotFoundError(f"ONNX model not found: {args.onnx_model}.")
-
-    convert_onnx_to_int8_tflite(args.onnx_model, args.tflite_model, args.data_dir)
+    convert(
+        saved_model_dir=args.saved_model,
+        output_path=args.output_model,
+        data_dir=args.data_dir,
+    )

@@ -1,5 +1,5 @@
 # Use a lightweight Python 3.10 slim image
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # 1. Install system dependencies required for OpenCV and GLib
 # We clean up apt lists immediately to keep the image small

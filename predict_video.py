@@ -48,46 +48,70 @@ def get_bindings(interpreter):
     # Keras TFLite models are typically NTHWC, PyTorch ONNX are NTCHW
     # Check the channel dimension.
     img_shape = img_in["shape"]
-    expects_nchw_time = (len(img_shape) == 5 and img_shape[2] == 3)
-    return img_in, sen_in, expects_nchw_time
 
-def build_clip_from_video(path, expects_nchw_time):
+    if img_shape[1] == 3:
+        image_layout = "BCHWT"
+    elif img_shape[4] == 3:
+        image_layout = "BTHWC"
+    else:
+        raise RuntimeError(f"Unknown image layout: {img_shape}")
+
+    return img_in, sen_in, image_layout
+
+def build_clip_from_video(path, image_layout):
     cap = cv2.VideoCapture(path)
+
     if not cap.isOpened():
         raise RuntimeError(f"Failed to open video: {path}")
 
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Sample CLIP frames uniformly
     if total <= 0:
         idxs = list(range(CLIP))
     else:
         step = max(total // CLIP, 1)
-        idxs = [min(i*step, total-1) for i in range(CLIP)]
+        idxs = [min(i * step, total - 1) for i in range(CLIP)]
 
     frames = []
-    for i in idxs:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-        ok, frm = cap.read()
+    for idx in idxs:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ok, frame = cap.read()
+
         if not ok:
-            break
-        rgb = center_crop_resize_bgr_to_rgb(frm, H)
-        nhwc = preprocess_rgb(rgb)
-        frames.append(nhwc)
+            continue
+
+        # BGR -> RGB + center crop + resize
+        rgb = center_crop_resize_bgr_to_rgb(frame, H)
+
+        # Normalize (H,W,C)
+        rgb = preprocess_rgb(rgb)
+        frames.append(rgb)
     cap.release()
 
-    if not frames:
-        frames = [np.zeros((H, W, C), np.float32)] * CLIP
-    if len(frames) < CLIP:
-        frames += [frames[-1]] * (CLIP - len(frames))
-    if len(frames) > CLIP:
-        frames = frames[:CLIP]
+    if len(frames) == 0:
+        raise RuntimeError("No frames could be read from the video.")
 
-    clip = np.stack(frames, axis=0).astype(np.float32)  # T H W C
-    if expects_nchw_time:
-        clip = np.transpose(clip, (0, 3, 1, 2))          # T C H W
-        clip = clip[np.newaxis, ...]                     # 1 T C H W
+    # Pad if fewer than CLIP frames
+    while len(frames) < CLIP:
+        frames.append(frames[-1])
+
+    # Trim if somehow more than CLIP
+    frames = frames[:CLIP]
+
+    # Stack to (T,H,W,C)
+    clip = np.stack(frames, axis=0).astype(np.float32)
+
+    if image_layout == "BCHWT":
+        # (T,H,W,C) -> (1,C,H,W,T)
+        clip = np.transpose(clip, (3, 1, 2, 0))
+        clip = np.expand_dims(clip, axis=0)
+    elif image_layout == "BTHWC":
+        # (T,H,W,C) -> (1,T,H,W,C)
+        clip = np.expand_dims(clip, axis=0)
     else:
-        clip = clip[np.newaxis, ...]                     # 1 T H W C
-    return clip
+        raise RuntimeError(f"Unsupported image layout: {image_layout}")
+    return clip.astype(np.float32)
 
 def build_sensor():
     return np.zeros((1, CLIP, SENSOR_DIM), dtype=np.float32)
@@ -98,14 +122,14 @@ def sigmoid(x):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
-    ap.add_argument("--model", default="liveness_model_int8.tflite", help="Path to the TFLite model file.")
+    ap.add_argument("--model", default="models/liveness_model_int8.tflite", help="Path to the TFLite model file.")
     args = ap.parse_args()
 
     interpreter = load_interpreter(args.model)
-    img_in, sen_in, expects_nchw_time = get_bindings(interpreter)
+    img_in, sen_in, image_layout = get_bindings(interpreter)
     out = interpreter.get_output_details()[0]
 
-    img = build_clip_from_video(args.video, expects_nchw_time)
+    img = build_clip_from_video(args.video, image_layout)
     sen = build_sensor()
 
     # Sanity

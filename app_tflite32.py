@@ -12,7 +12,7 @@ from tensorflow.lite.python.interpreter import Interpreter
 app = Flask(__name__)
 
 # ------------------ Config ------------------
-MODEL_PATH = "liveness_model_fp32.tflite"  # keep this name even if the model has FP16 weights
+MODEL_PATH = os.path.join("models", "liveness_model_fp32.tflite")  # keep this name even if the model has FP16 weights
 CLIP_LENGTH = 10
 SENSOR_DIM = 8
 
@@ -49,8 +49,14 @@ assert img_input_detail is not None, "Could not find image input in TFLite model
 assert sensor_input_detail is not None, "Could not find sensor input in TFLite model"
 
 # Does the image input expect N T C H W?
-img_shape = img_input_detail["shape"]  # e.g. [1, 10, 3, 224, 224]
-EXPECTS_NCHW_TIME = (len(img_shape) == 5 and img_shape[2] == 3)
+img_shape = img_input_detail["shape"]
+
+if img_shape[1] == 3:
+    IMAGE_LAYOUT = "BCHWT"      # (B,C,H,W,T)
+elif img_shape[4] == 3:
+    IMAGE_LAYOUT = "BTHWC"      # (B,T,H,W,C)
+else:
+    raise RuntimeError(f"Unknown image layout: {img_shape}")
 
 # ------------------ Detector ------------------
 detector = FaceDetector(minDetectionCon=0.7)
@@ -60,39 +66,38 @@ IM_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IM_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 def preprocess_image_clip(image_b64_list):
-    """
-    Decodes a list of base64 JPEG crops (face crops), produces a float32 clip
-    with normalization. Output layout matches model’s image input:
-      - if N T C H W is expected, returns (1, T, 3, 224, 224)
-      - if N T H W C is expected, returns (1, T, 224, 224, 3)
-    """
     frames = []
+
     for b64_img in image_b64_list:
         try:
             raw = b64_img.split(",")[-1]
-            img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGB")
-            img = img.resize((224, 224))
-            arr = np.asarray(img, dtype=np.float32) / 255.0  # HWC [0,1]
-            arr = (arr - IM_MEAN) / IM_STD                    # normalize
+
+            img = Image.open(
+                io.BytesIO(base64.b64decode(raw))
+            ).convert("RGB")
+
+            img = img.resize((224, 224), Image.BILINEAR)
+
+            arr = np.asarray(img, dtype=np.float32)
+            arr = (arr / 255.0 - IM_MEAN) / IM_STD
+
             frames.append(arr)
+
         except Exception as e:
             print("Frame decode error:", e)
-            continue
 
-    if not frames:
+    if len(frames) == 0:
         return None
 
-    # (T, H, W, C)
-    clip = np.stack(frames, axis=0).astype(np.float32)
+    clip = np.stack(frames, axis=0)
 
-    if EXPECTS_NCHW_TIME:
-        # -> (T, C, H, W) -> (1, T, C, H, W)
-        clip = np.transpose(clip, (0, 3, 1, 2))
-        clip = clip[np.newaxis, ...]
+    if IMAGE_LAYOUT == "BCHWT":
+        clip = np.transpose(clip, (3, 1, 2, 0))
+        clip = np.expand_dims(clip, axis=0)
     else:
-        # -> (1, T, H, W, C)
-        clip = clip[np.newaxis, ...]
-    return clip
+        clip = np.expand_dims(clip, axis=0)
+
+    return clip.astype(np.float32)
 
 def prepare_sensor_clip(sensor_clip):
     """Returns (1, T, 8) float32. If missing, fills zeros."""
@@ -150,8 +155,10 @@ def detect():
         encoded = base64.b64encode(buffer).decode("utf-8")
         return jsonify({"faces": faces, "image": f"data:image/jpeg;base64,{encoded}"})
     except Exception as e:
-        print("Detection Error:", e)
-        return jsonify({"error": "Detection failed"}), 500
+        import traceback
+        traceback.print_exc()
+        print("Prediction Error:", e)
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -162,8 +169,9 @@ def predict():
 
         if len(image_clip) != CLIP_LENGTH:
             return jsonify({"error": f"Expected {CLIP_LENGTH} frames, got {len(image_clip)}"}), 400
-
+        
         img_clip = preprocess_image_clip(image_clip)
+        print("img_clip:", None if img_clip is None else img_clip.shape)
         if img_clip is None:
             return jsonify({"error": "Failed to preprocess images"}), 400
 
@@ -184,7 +192,6 @@ def predict():
 
         return jsonify({"liveness_score": float(liveness), "result": result})
     except Exception as e:
-        print("Prediction Error:", e)
         return jsonify({"error": "Prediction failed"}), 500
 
 if __name__ == "__main__":

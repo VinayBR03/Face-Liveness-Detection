@@ -1,40 +1,63 @@
-# Flask Web Framework
-flask==3.0.3
+# ============================================================
+# Face Liveness Detection
+# Python 3.12
+# ============================================================
 
-# Core Libraries
-numpy==1.24.3
-opencv-python==4.9.0.80
-Pillow==10.4.0
+# ----------------------------
+# Web Framework
+# ----------------------------
+Flask==3.0.3
+gunicorn==21.2.0
+
+# ----------------------------
+# Numerical Computing
+# ----------------------------
+numpy==1.26.4
+scipy==1.16.1
+
+# ----------------------------
+# Deep Learning
+# ----------------------------
 torch==2.4.1
 torchvision==0.19.1
-tqdm==4.66.4
+
+# ----------------------------
+# TensorFlow / Lite
+# ----------------------------
+tensorflow==2.16.1
+tf-keras==2.16.0
+
+# ----------------------------
+# Computer Vision
+# ----------------------------
+opencv-contrib-python==4.10.0.84
+mediapipe==0.10.14
+cvzone==1.6.1
+Pillow==10.4.0
+
+# ----------------------------
+# ONNX
+# ----------------------------
+onnx==1.16.1
+onnxruntime==1.18.0
+onnxsim==0.6.5
+onnx2tf==1.26.8
+onnx-graphsurgeon==0.6.1
+
+# ----------------------------
+# Machine Learning
+# ----------------------------
 scikit-learn==1.7.2
 
-# Face Detection and Tracking
-mediapipe==0.10.11
-cvzone==1.6.1
-
-# Model Conversion Libraries (pinned for compatibility with TF 2.13)
-onnx==1.16.1
-onnx-tf==1.10.0
-tf2onnx==1.16.0
-onnxsim==0.4.36 
-onnxruntime==1.23.2
-# --extra-index-url https://pypi.ngc.nvidia.com onnx-graphsurgeon==0.3.26
-
-# TensorFlow Lite Runtime (for .tflite model inference)
-tensorflow==2.14.0
-tensorflow-probability==0.23.0
-
-# For JSON & HTTP requests
-requests==2.32.3
-
-# Protobuf (compatible with mediapipe 0.10.11)
-protobuf==3.20.3
-
-# For Metrics and Evaluation
+# ----------------------------
+# Visualization
+# ----------------------------
 matplotlib==3.10.7
 seaborn==0.13.2
 
-# For Deployment
-gunicorn==21.2.0
+# ----------------------------
+# Utilities
+# ----------------------------
+tqdm==4.66.4
+requests==2.32.3
+PyYAML==6.0.3

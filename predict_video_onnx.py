@@ -99,7 +99,7 @@ def run(video_path, onnx_path):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
-    ap.add_argument("--onnx", default="liveness_model.onnx")
+    ap.add_argument("--onnx", default="models/liveness_model.onnx")
     args = ap.parse_args()
     if not os.path.isfile(args.onnx):
         raise FileNotFoundError(f"ONNX not found: {args.onnx}")
