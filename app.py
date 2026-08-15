@@ -223,6 +223,10 @@ def index():
     print("===========================\n")
     return render_template("index.html")
 
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
 @app.route("/detect", methods=["POST"])
 def detect():
     try:
